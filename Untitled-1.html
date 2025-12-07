@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaaS POS Sport - Prototype Dark</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Styles pour le mode Dark */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #2d3748; } /* gray-800 */
+        ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; } /* gray-600 */
+        ::-webkit-scrollbar-thumb:hover { background: #718096; } /* gray-500 */
+        .no-select { user-select: none; }
+
+        /* Styles d'impression du ticket */
+        @media print {
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                background: white;
+                color: black;
+                width: 80mm;
+                margin: 0 auto;
+            }
+
+            .print-ticket {
+                width: 80mm;
+                background: white;
+                color: black;
+                padding: 5mm;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+                line-height: 1.4;
+            }
+
+            .print-ticket .ticket-header {
+                text-align: center;
+                border-bottom: 1px dashed black;
+                padding-bottom: 5mm;
+                margin-bottom: 5mm;
+            }
+
+            .print-ticket .ticket-title {
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 2mm;
+            }
+
+            .print-ticket .ticket-line {
+                display: flex;
+                justify-content: space-between;
+                padding: 2mm 0;
+                border-bottom: 1px dotted #ccc;
+            }
+
+            .print-ticket .ticket-total {
+                font-weight: bold;
+                font-size: 14px;
+                margin-top: 3mm;
+                padding-top: 3mm;
+                border-top: 1px solid black;
+                display: flex;
+                justify-content: space-between;
+            }
+
+            .print-ticket .ticket-footer {
+                text-align: center;
+                font-size: 10px;
+                margin-top: 5mm;
+                padding-top: 5mm;
+                border-top: 1px dashed black;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 h-screen w-screen overflow-hidden text-white">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- COMPOSANT MODALE AJOUT ARTICLE EN VENTE ---
+        const AddSaleModal = ({ isOpen, onClose, onAddItem }) => {
+            const [name, setName] = useState('');
+            const [price, setPrice] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!name || !price) {
+                    alert('Veuillez remplir tous les champs');
+                    return;
+                }
+                onAddItem(name, price);
+                setName('');
+                setPrice('');
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                    <div className="bg-gray-800 rounded-xl p-8 w-full max-w-md shadow-2xl border border-gray-700">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold text-white">Ajouter Article en Vente</h2>
+                            <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">✕</button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-300 mb-2">Nom de l'article *</label>
+                                <input 
+                                    type="text"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    placeholder="Ex: Bonnet Laine"
+                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-300 mb-2">Prix (€) *</label>
+                                <input 
+                                    type="number"
+                                    step="0.01"
+                                    value={price}
+                                    onChange={(e) => setPrice(e.target.value)}
+                                    placeholder="Ex: 29.99"
+                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="flex space-x-4 pt-6 border-t border-gray-700">
+                                <button type="submit" className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                                    Ajouter
+                                </button>
+                                <button type="button" onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                                    Annuler
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPOSANT MODALE AJOUT ARTICLE EN LOCATION ---
+        const AddRentalModal = ({ isOpen, onClose, onAddItem }) => {
+            const [name, setName] = useState('');
+            const [priceFullDay, setPriceFullDay] = useState('');
+            const [priceHalfDay, setPriceHalfDay] = useState('');
+            const [startDate, setStartDate] = useState('');
+            const [endDate, setEndDate] = useState('');
+            const [rentalType, setRentalType] = useState('fullday'); // 'fullday' ou 'halfday'
+
+            // Calcul du nombre de jours et du prix total
+            const calculateDuration = () => {
+                if (!startDate || !endDate) return { days: 0, total: 0, display: '' };
+                
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                const diffTime = Math.abs(end - start);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                let total = 0;
+                let display = '';
+                
+                if (rentalType === 'fullday') {
+                    total = diffDays * parseFloat(priceFullDay || 0);
+                    display = `${diffDays} jour(s) × ${priceFullDay}€ = ${total.toFixed(2)}€`;
+                } else {
+                    total = diffDays * parseFloat(priceHalfDay || 0);
+                    display = `${diffDays} demi-jour(s) × ${priceHalfDay}€ = ${total.toFixed(2)}€`;
+                }
+                
+                return { days: diffDays, total, display };
+            };
+
+            const duration = calculateDuration();
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!name || !priceFullDay || !priceHalfDay || !startDate || !endDate) {
+                    alert('Veuillez remplir tous les champs');
+                    return;
+                }
+                if (new Date(startDate) >= new Date(endDate)) {
+                    alert('La date de fin doit être après la date de début');
+                    return;
+                }
+                
+                // Déterminer le prix à facturer
+                const finalPrice = rentalType === 'fullday' ? duration.total : duration.total;
+                
+                onAddItem(name, finalPrice, startDate, endDate, rentalType, priceFullDay, priceHalfDay);
+                setName('');
+                setPriceFullDay('');
+                setPriceHalfDay('');
+                setStartDate('');
+                setEndDate('');
+                setRentalType('fullday');
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                    <div className="bg-gray-800 rounded-xl p-8 w-full max-w-lg shadow-2xl border border-gray-700 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold text-white">Ajouter Article en Location</h2>
+                            <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">✕</button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {/* Nom de l'article */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-300 mb-2">Nom de l'article *</label>
+                                <input 
+                                    type="text"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    placeholder="Ex: Location Skis Rossignol"
+                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            {/* Prix Journée Complète */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-300 mb-2">Prix Journée Complète (€) *</label>
+                                <input 
+                                    type="number"
+                                    step="0.01"
+                                    value={priceFullDay}
+                                    onChange={(e) => setPriceFullDay(e.target.value)}
+                                    placeholder="Ex: 35.00"
+                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            {/* Prix Demi-Journée */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-300 mb-2">Prix Demi-Journée (€) *</label>
+                                <input 
+                                    type="number"
+                                    step="0.01"
+                                    value={priceHalfDay}
+                                    onChange={(e) => setPriceHalfDay(e.target.value)}
+                                    placeholder="Ex: 20.00"
+                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            {/* Dates */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">Date de début *</label>
+                                    <input 
+                                        type="date"
+                                        value={startDate}
+                                        onChange={(e) => setStartDate(e.target.value)}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">Date de fin *</label>
+                                    <input 
+                                        type="date"
+                                        value={endDate}
+                                        onChange={(e) => setEndDate(e.target.value)}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Type de location */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-300 mb-2">Type de location *</label>
+                                <div className="flex space-x-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setRentalType('fullday')}
+                                        className={`flex-1 py-2 px-4 rounded-lg font-semibold transition ${
+                                            rentalType === 'fullday'
+                                                ? 'bg-green-600 text-white'
+                                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        Journée Complète
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setRentalType('halfday')}
+                                        className={`flex-1 py-2 px-4 rounded-lg font-semibold transition ${
+                                            rentalType === 'halfday'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        Demi-Journée
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Calcul du total */}
+                            {startDate && endDate && (
+                                <div className="p-3 bg-gray-900 rounded border border-gray-700">
+                                    <div className="text-sm text-gray-400 mb-2">Calcul du total :</div>
+                                    <div className="text-lg font-bold text-green-400">{duration.display}</div>
+                                </div>
+                            )}
+
+                            <div className="text-xs text-gray-400 bg-gray-900 p-2 rounded">
+                                ℹ️ Les détails de location seront liés au client sélectionné
+                            </div>
+
+                            <div className="flex space-x-4 pt-6 border-t border-gray-700">
+                                <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                                    Ajouter
+                                </button>
+                                <button type="button" onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                                    Annuler
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPOSANT MODALE CLIENT (SÉPARÉ) ---
+        const ClientManagementModal = ({
+            isOpen, 
+            onClose, 
+            clients, 
+            onAddClient, 
+            onSelectClient, 
+            generateClientNumber 
+        }) => {
+            const [formData, setFormData] = useState({
+                nom: '',
+                prenom: '',
+                adresse: '',
+                dateNaissance: '',
+                ville: ''
+            });
+
+            const handleFormChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({
+                    ...prev,
+                    [name]: value
+                }));
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                
+                if (!formData.nom || !formData.prenom || !formData.adresse || !formData.dateNaissance || !formData.ville) {
+                    alert('Veuillez remplir tous les champs');
+                    return;
+                }
+
+                const newClient = {
+                    id: `C${String(clients.length + 1).padStart(3, '0')}`,
+                    num: generateClientNumber(),
+                    nom: formData.nom,
+                    prenom: formData.prenom,
+                    adresse: formData.adresse,
+                    dateNaissance: formData.dateNaissance,
+                    ville: formData.ville,
+                    loyaltyPoints: 0
+                };
+
+                onAddClient(newClient);
+                setFormData({ nom: '', prenom: '', adresse: '', dateNaissance: '', ville: '' });
+                alert(`Client créé avec succès ! Numéro: ${newClient.num}`);
+            };
+
+            const handleClose = () => {
+                setFormData({ nom: '', prenom: '', adresse: '', dateNaissance: '', ville: '' });
+                onClose();
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                    <div className="bg-gray-800 rounded-xl p-8 w-full max-w-2xl shadow-2xl border border-gray-700 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold text-white">Gestion des Clients</h2>
+                            <button 
+                                onClick={handleClose}
+                                className="text-gray-400 hover:text-white text-2xl"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Onglets */}
+                        <div className="flex space-x-4 mb-6 border-b border-gray-700">
+                            <button className="px-4 py-2 text-green-400 border-b-2 border-green-400 font-semibold">
+                                Créer Client
+                            </button>
+                            <button className="px-4 py-2 text-gray-400 hover:text-white">
+                                Consulter
+                            </button>
+                        </div>
+
+                        {/* Formulaire Création Client */}
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Numéro de Client (Lecture Seule) */}
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                        Numéro de Client
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        readOnly
+                                        value={generateClientNumber()}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white font-mono cursor-not-allowed opacity-75"
+                                    />
+                                </div>
+
+                                {/* Prénom */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                        Prénom *
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        name="prenom"
+                                        placeholder="Jean"
+                                        value={formData.prenom}
+                                        onChange={handleFormChange}
+                                        required
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    />
+                                </div>
+
+                                {/* Nom */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                        Nom *
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        name="nom"
+                                        placeholder="Dupont"
+                                        value={formData.nom}
+                                        onChange={handleFormChange}
+                                        required
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    />
+                                </div>
+
+                                {/* Adresse */}
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                        Adresse *
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        name="adresse"
+                                        placeholder="123 Rue de la Paix"
+                                        value={formData.adresse}
+                                        onChange={handleFormChange}
+                                        required
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    />
+                                </div>
+
+                                {/* Date de Naissance */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                        Date de Naissance *
+                                    </label>
+                                    <input 
+                                        type="date"
+                                        name="dateNaissance"
+                                        value={formData.dateNaissance}
+                                        onChange={handleFormChange}
+                                        required
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    />
+                                </div>
+
+                                {/* Ville */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                        Ville *
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        name="ville"
+                                        placeholder="Chamonix"
+                                        value={formData.ville}
+                                        onChange={handleFormChange}
+                                        required
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Boutons */}
+                            <div className="flex space-x-4 pt-6 border-t border-gray-700">
+                                <button 
+                                    type="submit"
+                                    className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                                >
+                                    Créer Client
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={handleClose}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition"
+                                >
+                                    Annuler
+                                </button>
+                            </div>
+                        </form>
+
+                        {/* Liste des Clients Existants */}
+                        {clients.length > 0 && (
+                            <div className="mt-8 pt-8 border-t border-gray-700">
+                                <h3 className="text-lg font-bold text-white mb-4">Clients Existants</h3>
+                                <div className="space-y-2 max-h-64 overflow-y-auto">
+                                    {clients.map((client) => (
+                                        <div 
+                                            key={client.id}
+                                            onClick={() => {
+                                                onSelectClient(client);
+                                                handleClose();
+                                            }}
+                                            className="p-3 bg-gray-700 hover:bg-gray-600 rounded-lg cursor-pointer transition border border-gray-600"
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <div>
+                                                    <div className="font-bold text-white">{client.prenom} {client.nom}</div>
+                                                    <div className="text-xs text-gray-400">{client.adresse} - {client.ville}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="font-mono text-green-400 font-bold">{client.num}</div>
+                                                    <div className="text-xs text-gray-400">{client.loyaltyPoints} points</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+        // --- DONNÉES SIMULÉES (Adaptées Sport & Location) ---
+        const MOCK_CLIENTS = [
+            { id: 'C001', num: 'CLI-001', nom: 'Dupont', prenom: 'Jean', adresse: '123 Rue de la Paix', dateNaissance: '1990-05-15', ville: 'Chamonix', loyaltyPoints: 450 },
+            { id: 'C002', num: 'CLI-002', nom: 'Martin', prenom: 'Sophie', adresse: '456 Avenue des Pistes', dateNaissance: '1985-08-20', ville: 'Annecy', loyaltyPoints: 120 },
+        ];
+
+        const MOCK_PRODUCTS = [
+            { id: 101, name: 'Pack Ski Alpin - Expert', price: 35.00, isRentable: true, category: 'Location', color: 'bg-green-600/30', text: 'text-green-300', barcode: '3701234567891' },
+            { id: 102, name: 'Location VTT Adulte (Jour)', price: 25.00, isRentable: true, category: 'Location', color: 'bg-green-600/30', text: 'text-green-300', barcode: '3701234567892' },
+            { id: 201, name: 'Gants de Ski Imperméables', price: 49.99, isRentable: false, category: 'Vente', color: 'bg-indigo-600/30', text: 'text-indigo-300', barcode: '3701234567893' },
+            { id: 202, name: 'Casquette Technique', price: 19.99, isRentable: false, category: 'Vente', color: 'bg-indigo-600/30', text: 'text-indigo-300', barcode: '3701234567894' },
+            { id: 301, name: 'Forfait Saison VTT', price: 299.00, isRentable: false, category: 'Services', color: 'bg-yellow-600/30', text: 'text-yellow-300', barcode: '3701234567895' },
+            { id: 302, name: 'Réparation Ski (Atelier)', price: 45.00, isRentable: false, category: 'Services', color: 'bg-yellow-600/30', text: 'text-yellow-300', barcode: '3701234567896' },
+        ];
+
+        // Structure d'un article dans le panier (avec détails de location)
+        const initialRentalItem = { 
+            id: 900, 
+            name: 'Location Ski Alpin Elite - 3 Jours', 
+            price: 90.00, 
+            qty: 1, 
+            isRentable: true,
+            details: {
+                startDate: '2025-08-16',
+                endDate: '2025-08-18',
+                caution: 250.00,
+                client: 'Jean Dupont (ID: C097)'
+            } 
+        };
+
+        const POS = () => {
+            const [cart, setCart] = useState([initialRentalItem]); // Panier pré-rempli pour la démo
+            const [searchQuery, setSearchQuery] = useState('');
+            const [serviceTab, setServiceTab] = useState('Vente'); // 'Vente', 'Location', 'Atelier'
+            const [clients, setClients] = useState(MOCK_CLIENTS);
+            const [selectedClient, setSelectedClient] = useState(null);
+            const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+            const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
+            const [barcodeInput, setBarcodeInput] = useState('');
+            const [scanMessage, setScanMessage] = useState('');
+            const [scanMessageType, setScanMessageType] = useState(''); // 'success', 'error', 'info'
+            const [isAddSaleModalOpen, setIsAddSaleModalOpen] = useState(false);
+            const [isAddRentalModalOpen, setIsAddRentalModalOpen] = useState(false);
+            const [transactions, setTransactions] = useState(() => {
+                // Charger les transactions depuis localStorage
+                const saved = localStorage.getItem('posTransactions');
+                return saved ? JSON.parse(saved) : [];
+            });
+            const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+            const [historyFilter, setHistoryFilter] = useState('jour'); // 'jour', 'mois', 'annee'
+
+            // Modes de paiement disponibles
+            const paymentMethods = [
+                { id: 'especes', label: 'Espèces', icon: '💵', color: 'bg-green-600' },
+                { id: 'carte', label: 'Carte Bancaire', icon: '💳', color: 'bg-blue-600' },
+                { id: 'cleu', label: 'Clé-U', icon: '🔑', color: 'bg-purple-600' },
+                { id: 'cheque', label: 'Chèque Cadeau', icon: '🎁', color: 'bg-pink-600' },
+                { id: 'globalpos', label: 'GlobalPos', icon: '📱', color: 'bg-indigo-600' },
+            ];
+
+            // Fonction pour générer un numéro de client unique
+            const generateClientNumber = () => {
+                const maxNum = clients.length > 0 
+                    ? Math.max(...clients.map(c => parseInt(c.num.split('-')[1])))
+                    : 0;
+                return `CLI-${String(maxNum + 1).padStart(3, '0')}`;
+            };
+
+            const handleAddClient = (newClient) => {
+                setClients(prev => [...prev, newClient]);
+                setSelectedClient(newClient);
+            };
+
+            const handleSelectClient = (client) => {
+                setSelectedClient(client);
+            };
+
+            const addToCart = (product) => {
+                setCart((prevCart) => {
+                    // Si c'est un produit de vente, on incrémente la quantité
+                    if (!product.isRentable) {
+                        const existingItem = prevCart.find((item) => item.id === product.id && !item.isRentable);
+                        if (existingItem) {
+                            return prevCart.map((item) =>
+                                item.id === product.id ? { ...item, qty: item.qty + 1 } : item
+                            );
+                        }
+                    }
+                    
+                    // Pour les locations, on ajoute une nouvelle ligne (chaque location est unique)
+                    return [...prevCart, { ...product, qty: 1 }];
+                });
+            };
+
+            const updateQty = (id, delta) => {
+                setCart((prevCart) => {
+                    return prevCart.map((item) => {
+                        if (item.id === id) return { ...item, qty: Math.max(0, item.qty + delta) };
+                        return item;
+                    }).filter(item => item.qty > 0);
+                });
+            };
+
+            const clearCart = () => {
+                if(window.confirm('Voulez-vous annuler ce ticket ?')) {
+                    setCart([]);
+                }
+            };
+
+            const handlePay = () => {
+                saveTransaction();
+                handlePrintTicket();
+            };
+
+            const handleBarcodeScan = (e) => {
+                e.preventDefault();
+                
+                if (!barcodeInput.trim()) {
+                    setScanMessage('Veuillez scanner un code-barre');
+                    setScanMessageType('info');
+                    return;
+                }
+
+                // Rechercher le produit par code-barre
+                const scannedProduct = MOCK_PRODUCTS.find(p => p.barcode === barcodeInput);
+                
+                if (scannedProduct) {
+                    // Ajouter le produit au panier
+                    addToCart(scannedProduct);
+                    setScanMessage(`✓ ${scannedProduct.name} ajouté au panier`);
+                    setScanMessageType('success');
+                } else {
+                    setScanMessage(`✗ Article non trouvé (Code: ${barcodeInput})`);
+                    setScanMessageType('error');
+                }
+
+                // Réinitialiser le champ et afficher le message pendant 2 secondes
+                setBarcodeInput('');
+                setTimeout(() => setScanMessage(''), 2000);
+            };
+
+            // Handlers pour l'ajout d'articles en vente et location
+            const handleAddSaleItem = (name, price) => {
+                // Générer un code-barre unique
+                const newBarcode = '37' + Math.random().toString().slice(2, 13);
+                
+                // Créer le nouveau produit
+                const newProduct = {
+                    id: Math.max(...MOCK_PRODUCTS.map(p => p.id), 0) + 1,
+                    name: name,
+                    price: parseFloat(price),
+                    isRentable: false,
+                    category: 'Vente',
+                    color: 'bg-indigo-600/30',
+                    text: 'text-indigo-300',
+                    barcode: newBarcode
+                };
+                
+                // Ajouter au catalogue
+                MOCK_PRODUCTS.push(newProduct);
+                
+                // Créer l'article pour le panier
+                const newItem = {
+                    id: Math.random(),
+                    name: name,
+                    price: parseFloat(price),
+                    qty: 1,
+                    isRentable: false,
+                    category: 'Vente',
+                    details: { variant: 'Custom' }
+                };
+                
+                // Ajouter au panier
+                addToCart(newItem);
+                setIsAddSaleModalOpen(false);
+            };
+            
+            const handleAddRentalItem = (name, price, startDate, endDate, rentalType, priceFullDay, priceHalfDay) => {
+                // Générer un code-barre unique
+                const newBarcode = '37' + Math.random().toString().slice(2, 13);
+                
+                // Créer le nouveau produit
+                const newProduct = {
+                    id: Math.max(...MOCK_PRODUCTS.map(p => p.id), 0) + 1,
+                    name: name,
+                    price: parseFloat(price),
+                    isRentable: true,
+                    category: 'Location',
+                    color: 'bg-green-600/30',
+                    text: 'text-green-300',
+                    barcode: newBarcode
+                };
+                
+                // Ajouter au catalogue
+                MOCK_PRODUCTS.push(newProduct);
+                
+                // Créer l'article pour le panier
+                const newItem = {
+                    id: Math.random(),
+                    name: name,
+                    price: parseFloat(price),
+                    qty: 1,
+                    isRentable: true,
+                    category: 'Location',
+                    details: {
+                        startDate: startDate,
+                        endDate: endDate,
+                        rentalType: rentalType,
+                        priceFullDay: parseFloat(priceFullDay),
+                        priceHalfDay: parseFloat(priceHalfDay),
+                        caution: 0,
+                        client: selectedClient ? `${selectedClient.prenom} ${selectedClient.nom}` : 'Client non sélectionné'
+                    }
+                };
+                
+                // Ajouter au panier
+                addToCart(newItem);
+                setIsAddRentalModalOpen(false);
+            };
+
+            // Fonction pour enregistrer une transaction
+            const saveTransaction = () => {
+                if (cart.length === 0) {
+                    alert('Panier vide! Ajoutez des articles avant de valider.');
+                    return;
+                }
+
+                if (!selectedPaymentMethod) {
+                    alert('Veuillez sélectionner un mode de paiement!');
+                    return;
+                }
+
+                const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
+                const paymentLabel = paymentMethods.find(m => m.id === selectedPaymentMethod)?.label || 'Non spécifié';
+                
+                const newTransaction = {
+                    id: Date.now(),
+                    date: new Date().toISOString(),
+                    client: selectedClient ? `${selectedClient.prenom} ${selectedClient.nom}` : 'Client non sélectionné',
+                    clientNum: selectedClient?.num || 'N/A',
+                    items: cart.map(item => ({
+                        name: item.name,
+                        qty: item.qty,
+                        price: item.price,
+                        subtotal: item.price * item.qty
+                    })),
+                    total: total,
+                    paymentMethod: paymentLabel,
+                    notes: ''
+                };
+
+                // Ajouter à l'état et sauvegarder dans localStorage
+                const updatedTransactions = [...transactions, newTransaction];
+                setTransactions(updatedTransactions);
+                localStorage.setItem('posTransactions', JSON.stringify(updatedTransactions));
+
+                // Vider le panier et réinitialiser
+                setCart([]);
+                setSelectedPaymentMethod(null);
+                setSelectedClient(null);
+
+                alert('✅ Transaction enregistrée avec succès!');
+            };
+
+            // Filtrer les transactions par date
+            const getFilteredTransactions = () => {
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                const yearStart = new Date(now.getFullYear(), 0, 1);
+
+                return transactions.filter(tx => {
+                    const txDate = new Date(tx.date);
+                    const txDateOnly = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate());
+
+                    if (historyFilter === 'jour') {
+                        return txDateOnly.getTime() === today.getTime();
+                    } else if (historyFilter === 'mois') {
+                        return txDate.getFullYear() === now.getFullYear() && txDate.getMonth() === now.getMonth();
+                    } else if (historyFilter === 'annee') {
+                        return txDate.getFullYear() === now.getFullYear();
+                    }
+                    return true;
+                });
+            };
+
+            // Calcul des statistiques
+            const getStats = () => {
+                const filtered = getFilteredTransactions();
+                const totalRevenue = filtered.reduce((acc, tx) => acc + tx.total, 0);
+                const totalTransactions = filtered.length;
+                const totalItems = filtered.reduce((acc, tx) => acc + tx.items.reduce((sum, item) => sum + item.qty, 0), 0);
+
+                return { totalRevenue, totalTransactions, totalItems };
+            };
+
+            const handlePrintTicket = () => {
+                // Créer un élément invisible pour l'impression
+                const printWindow = window.open('', '', 'height=400,width=300');
+                const ticketHTML = generateTicketHTML();
+                
+                printWindow.document.write(ticketHTML);
+                printWindow.document.close();
+                
+                // Attendre que le document soit chargé avant d'imprimer
+                setTimeout(() => {
+                    printWindow.print();
+                    printWindow.close();
+                }, 250);
+            };
+
+            const generateTicketHTML = () => {
+                const now = new Date();
+                const dateStr = now.toLocaleDateString('fr-FR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+                const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                
+                const ticketItems = cart.map(item => `
+                    <div style="display: flex; justify-content: space-between; padding: 2mm 0; border-bottom: 1px dotted #ccc;">
+                        <div style="flex: 1;">
+                            <div>${item.name.substring(0, 20)}</div>
+                            <div style="font-size: 10px; color: #666;">${item.qty}x ${formatPrice(item.price)}</div>
+                        </div>
+                        <div style="text-align: right; font-weight: bold;">
+                            ${formatPrice(item.price * item.qty)}
+                        </div>
+                    </div>
+                `).join('');
+
+                const selectedPaymentLabel = selectedPaymentMethod 
+                    ? paymentMethods.find(m => m.id === selectedPaymentMethod)?.label 
+                    : 'Non spécifié';
+
+                return `
+                    <!DOCTYPE html>
+                    <html lang="fr">
+                    <head>
+                        <meta charset="UTF-8">
+                        <style>
+                            body {
+                                margin: 0;
+                                padding: 5mm;
+                                width: 80mm;
+                                background: white;
+                                color: black;
+                                font-family: 'Courier New', monospace;
+                                font-size: 12px;
+                                line-height: 1.4;
+                            }
+                            .ticket-header {
+                                text-align: center;
+                                border-bottom: 2px solid black;
+                                padding-bottom: 5mm;
+                                margin-bottom: 5mm;
+                            }
+                            .ticket-title {
+                                font-size: 18px;
+                                font-weight: bold;
+                                margin-bottom: 2mm;
+                            }
+                            .ticket-line {
+                                display: flex;
+                                justify-content: space-between;
+                                padding: 2mm 0;
+                            }
+                            .ticket-item {
+                                padding: 2mm 0;
+                                border-bottom: 1px dotted #ccc;
+                            }
+                            .ticket-total {
+                                font-weight: bold;
+                                font-size: 14px;
+                                margin-top: 3mm;
+                                padding-top: 3mm;
+                                border-top: 2px solid black;
+                                display: flex;
+                                justify-content: space-between;
+                            }
+                            .ticket-footer {
+                                text-align: center;
+                                font-size: 10px;
+                                margin-top: 5mm;
+                                padding-top: 5mm;
+                                border-top: 1px dashed black;
+                            }
+                            .info-row {
+                                display: flex;
+                                justify-content: space-between;
+                                font-size: 11px;
+                                margin: 1mm 0;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="ticket-header">
+                            <div class="ticket-title">POS SPORT 🎿</div>
+                            <div style="font-size: 11px; margin-top: 2mm;">Ticket de Caisse</div>
+                        </div>
+
+                        <div style="font-size: 10px; margin-bottom: 5mm;">
+                            <div class="info-row">
+                                <span>Date:</span>
+                                <span>${dateStr} ${timeStr}</span>
+                            </div>
+                            ${selectedClient ? `
+                                <div class="info-row">
+                                    <span>Client:</span>
+                                    <span>${selectedClient.prenom} ${selectedClient.nom}</span>
+                                </div>
+                                <div class="info-row">
+                                    <span>N° Client:</span>
+                                    <span>${selectedClient.num}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div style="margin-bottom: 5mm;">
+                            ${ticketItems}
+                        </div>
+
+                        <div class="ticket-total">
+                            <span>TOTAL TTC:</span>
+                            <span>${formatPrice(total)}</span>
+                        </div>
+
+                        <div style="margin-top: 3mm; padding: 2mm; background: #f0f0f0; border: 1px solid #ccc;">
+                            <div style="text-align: center; font-weight: bold; margin-bottom: 1mm;">Mode de Paiement</div>
+                            <div style="text-align: center; font-size: 13px; font-weight: bold;">
+                                ${selectedPaymentLabel}
+                            </div>
+                        </div>
+
+                        <div class="ticket-footer">
+                            <div style="margin: 3mm 0;">Merci pour votre achat!</div>
+                            <div>POS Sport © 2025</div>
+                        </div>
+                    </body>
+                    </html>
+                `;
+            };
+
+            // Calcul du total TTC (Exclut la caution pour le moment)
+            const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
+            const formatPrice = (price) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(price);
+
+            const filteredProducts = MOCK_PRODUCTS.filter(p => 
+                p.category === serviceTab && p.name.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+
+            const tabs = ['Vente', 'Location', 'Services'];
+
+            return (
+                <div className="flex h-screen font-sans bg-gray-900">
+                    
+                    {/* --- GAUCHE : TICKET (25%) --- */}
+                    <div className="w-1/4 flex flex-col bg-gray-800 border-r border-gray-700 shadow-2xl z-10 relative">
+                        <div className="p-4 bg-gray-900 text-white flex justify-between items-center shadow-md">
+                            <h1 className="font-extrabold text-2xl text-green-400">POS Sport 🎿</h1>
+                            <div className="text-xs text-gray-400">Ticket #2024-88</div>
+                        </div>
+
+                        {/* Champ de Scan Code-Barre */}
+                        <form onSubmit={handleBarcodeScan} className="p-3 bg-gray-800 border-b border-gray-700">
+                            <label className="text-xs text-gray-400 mb-1 block font-semibold">Scanner un article</label>
+                            <div className="flex items-center space-x-2">
+                                <input 
+                                    type="text"
+                                    value={barcodeInput}
+                                    onChange={(e) => setBarcodeInput(e.target.value)}
+                                    placeholder="Code-barre..."
+                                    className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none placeholder-gray-500"
+                                    autoFocus
+                                />
+                                <button 
+                                    type="submit"
+                                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition text-sm"
+                                >
+                                    📱
+                                </button>
+                            </div>
+                            
+                            {/* Message de Scan */}
+                            {scanMessage && (
+                                <div className={`mt-2 p-2 rounded text-xs font-semibold text-center ${
+                                    scanMessageType === 'success' ? 'bg-green-900/50 text-green-300 border border-green-600' :
+                                    scanMessageType === 'error' ? 'bg-red-900/50 text-red-300 border border-red-600' :
+                                    'bg-blue-900/50 text-blue-300 border border-blue-600'
+                                }`}>
+                                    {scanMessage}
+                                </div>
+                            )}
+                        </form>
+
+                        {/* Liste Panier */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                            {cart.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-gray-500 select-none">
+                                    <svg className="w-16 h-16 mb-4 opacity-20" fill="currentColor" viewBox="0 0 20 20"><path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"></path></svg>
+                                    <span className="italic">Ajoutez des articles ou des locations...</span>
+                                </div>
+                            ) : (
+                                cart.map((item, index) => (
+                                    <div key={index} className="flex flex-col p-3 bg-gray-700 rounded-lg shadow-lg border border-gray-600 transition">
+                                        
+                                        {/* Ligne principale (Nom / Qty / Prix) */}
+                                        <div className="flex justify-between items-center pb-2">
+                                            <div className="flex-1">
+                                                <div className="font-bold text-gray-200">{item.name}</div>
+                                                <div className="text-xs text-gray-400">{formatPrice(item.price)} / unité</div>
+                                            </div>
+                                            
+                                            {/* Contrôles Quantité */}
+                                            <div className="flex items-center space-x-2 bg-gray-900 rounded-full p-0.5">
+                                                <button onClick={() => updateQty(item.id, -1)} className="w-6 h-6 rounded-full bg-gray-600 text-red-400 hover:bg-red-900 font-bold">-</button>
+                                                <span className="font-bold w-4 text-center text-sm">{item.qty}</span>
+                                                <button onClick={() => updateQty(item.id, 1)} className="w-6 h-6 rounded-full bg-gray-600 text-green-400 hover:bg-green-900 font-bold">+</button>
+                                            </div>
+                                            
+                                            <div className="w-20 text-right font-bold text-lg text-green-300">
+                                                {formatPrice(item.price * item.qty)}
+                                            </div>
+                                        </div>
+
+                                        {/* Détails de Location (Si applicable) */}
+                                        {item.isRentable && item.details && (
+                                            <div className="text-xs p-2 mt-2 bg-gray-900 rounded border border-gray-700 space-y-1">
+                                                <div className="font-semibold text-blue-400">Détails de Location:</div>
+                                                <div className="flex justify-between text-gray-400"><span>Période:</span> <span>{item.details.startDate} → {item.details.endDate}</span></div>
+                                                <div className="flex justify-between text-gray-400"><span>Type:</span> <span className="font-semibold text-blue-300">{item.details.rentalType === 'fullday' ? '📅 Journée Complète' : '⏰ Demi-Journée'}</span></div>
+                                                {item.details.priceFullDay && (
+                                                    <div className="flex justify-between text-gray-400"><span>Tarifs:</span> <span>{formatPrice(item.details.priceFullDay)}/j - {formatPrice(item.details.priceHalfDay)}/½j</span></div>
+                                                )}
+                                                <div className="flex justify-between text-gray-400"><span>Client:</span> <span>{item.details.client}</span></div>
+                                                {item.details.caution > 0 && (
+                                                    <div className="flex justify-between text-gray-300 font-bold"><span>Caution:</span> <span className="text-yellow-400">{formatPrice(item.details.caution)}</span></div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                    </div>
+                                ))
+                            )}
+                        </div>                        {/* Aide - Codes-barres Disponibles (Collapsible) */}
+                        <details className="p-3 bg-gray-800 border-t border-gray-700 text-xs">
+                            <summary className="cursor-pointer font-semibold text-gray-300 hover:text-white">📋 Codes-barres disponibles</summary>
+                            <div className="mt-2 space-y-1 text-gray-400 text-xs">
+                                {MOCK_PRODUCTS.map(product => (
+                                    <div key={product.id} className="p-1 bg-gray-900 rounded border border-gray-700">
+                                        <div className="font-mono text-blue-300">{product.barcode}</div>
+                                        <div className="truncate">{product.name}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </details>
+
+                        {/* Bloc Client Sélectionné */}
+                        <div className="p-4 bg-gray-800 border-t border-gray-700">
+                            {selectedClient ? (
+                                <div className="p-3 bg-green-900/30 border border-green-600 rounded-lg">
+                                    <div className="text-xs text-gray-400 mb-1">Client Sélectionné</div>
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="font-bold text-white">{selectedClient.prenom} {selectedClient.nom}</div>
+                                            <div className="text-xs text-gray-400 mt-1">{selectedClient.num}</div>
+                                        </div>
+                                        <button 
+                                            onClick={() => setIsClientModalOpen(true)}
+                                            className="text-blue-400 hover:text-blue-300 text-xs font-semibold"
+                                        >
+                                            Changer
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button 
+                                    onClick={() => setIsClientModalOpen(true)}
+                                    className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition text-sm"
+                                >
+                                    + Sélectionner/Créer un Client
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Totaux & Paiement */}
+                        <div className="p-4 bg-gray-900 border-t border-gray-700 shadow-[0_-5px_15px_rgba(0,0,0,0.4)]">
+                            <div className="flex justify-between items-center mb-4">
+                                <span className="text-2xl font-bold text-gray-200">Total TTC</span>
+                                <span className="text-4xl font-extrabold text-green-400">{formatPrice(total)}</span>
+                            </div>
+                            
+                            <div className="space-y-2">
+                                <button 
+                                    onClick={() => {
+                                        saveTransaction();
+                                        handlePrintTicket();
+                                    }}
+                                    disabled={cart.length === 0 || !selectedPaymentMethod}
+                                    className={`w-full py-4 rounded-xl text-white text-xl font-bold shadow-lg transform transition active:scale-95 flex items-center justify-center space-x-2
+                                        ${cart.length === 0 || !selectedPaymentMethod ? 'bg-gray-600 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 hover:shadow-green-700/50'}`}
+                                >
+                                    <span>VALIDER & ENCAISSER</span>
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2m0 0l4-4m-4 4H7a2 2 0 000 4h10a2 2 0 100-4H9z"></path></svg>
+                                </button>
+
+                                <button 
+                                    onClick={() => setIsHistoryOpen(true)}
+                                    className="w-full py-3 rounded-lg text-white font-semibold shadow-lg transform transition active:scale-95 flex items-center justify-center space-x-2 bg-purple-600 hover:bg-purple-700 hover:shadow-purple-700/50"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                                    <span>HISTORIQUE</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- CENTRE : CATALOGUE (55%) --- */}
+                    <div className="w-1/2 flex flex-col h-full bg-gray-900 border-r border-gray-700">
+                        
+                        {/* Onglets Services & Recherche */}
+                        <div className="p-4 bg-gray-800 shadow-lg sticky top-0 z-20">
+                            <div className="flex mb-4 border-b border-gray-700">
+                                {tabs.map(tab => (
+                                    <button 
+                                        key={tab}
+                                        onClick={() => { setServiceTab(tab); setSearchQuery(''); }}
+                                        className={`px-6 py-3 text-sm font-semibold transition duration-200 
+                                            ${serviceTab === tab ? 'text-green-400 border-b-2 border-green-400' : 'text-gray-400 hover:text-white'}`}
+                                    >
+                                        {tab}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="relative flex items-center space-x-2">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                </span>
+                                <input 
+                                    type="text" 
+                                    placeholder={`Rechercher un article ou une ${serviceTab.toLowerCase()}...`} 
+                                    className="flex-1 py-3 pl-10 pr-4 rounded-lg bg-gray-700 border border-gray-600 focus:bg-gray-800 focus:ring-2 focus:ring-blue-500 focus:outline-none text-white transition"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
+                                
+                                {/* Boutons d'ajout d'articles */}
+                                <button 
+                                    onClick={() => setIsAddSaleModalOpen(true)}
+                                    className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition text-sm whitespace-nowrap"
+                                    title="Ajouter article en vente"
+                                >
+                                    + Vente
+                                </button>
+                                <button 
+                                    onClick={() => setIsAddRentalModalOpen(true)}
+                                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition text-sm whitespace-nowrap"
+                                    title="Ajouter article en location"
+                                >
+                                    + Location
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Grille Produits */}
+                        <div className="flex-1 p-6 overflow-y-auto">
+                            {filteredProducts.length === 0 ? (
+                                <div className="text-center text-gray-500 mt-10">
+                                    Aucun article trouvé dans l'onglet "{serviceTab}".
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-3 xl:grid-cols-4 gap-4">
+                                    {filteredProducts.map((product) => (
+                                        <div 
+                                            key={product.id}
+                                            onClick={() => addToCart(product)}
+                                            className={`
+                                                cursor-pointer relative h-40 rounded-xl shadow-lg border border-gray-700 
+                                                hover:shadow-xl hover:border-blue-500 transition-all duration-200 
+                                                flex flex-col items-center justify-center p-4 text-center no-select bg-gray-800
+                                                active:scale-95 group overflow-hidden
+                                            `}
+                                        >
+                                            {/* Bannière de Catégorie/Couleur */}
+                                            <div className={`absolute top-0 left-0 w-full h-1.5 ${product.color.replace('/30', '')}`}></div>
+                                            
+                                            {/* Icône (simulée) */}
+                                            <div className={`w-14 h-14 rounded-full mb-3 ${product.color} ${product.text} flex items-center justify-center text-xl font-bold`}>
+                                                {product.name.charAt(0)}
+                                            </div>
+                                            
+                                            <div className="font-bold text-gray-100 leading-tight mb-1">{product.name}</div>
+                                            <div className="text-sm font-semibold text-green-400 bg-green-900/40 px-2 py-1 rounded-full">{formatPrice(product.price)}</div>
+
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* --- MODES DE PAIEMENT --- */}
+                    </div>
+
+                    {/* --- DROITE : MODES DE PAIEMENT (20%) --- */}
+                    <div className="w-1/5 flex flex-col bg-gray-800 border-l border-gray-700 shadow-lg">
+                        <div className="p-4 bg-gray-900 text-white shadow-md sticky top-0 z-20">
+                            <h3 className="text-sm font-bold text-gray-300">Mode de Paiement</h3>
+                        </div>
+                        
+                        <div className="flex-1 flex flex-col p-4 overflow-y-auto space-y-3">
+                            <div className="grid grid-cols-1 gap-3">
+                                {paymentMethods.map((method) => (
+                                    <button
+                                        key={method.id}
+                                        onClick={() => setSelectedPaymentMethod(method.id)}
+                                        className={`
+                                            py-3 px-3 rounded-lg text-sm font-semibold transition-all duration-200
+                                            flex flex-col items-center justify-center space-y-2
+                                            ${selectedPaymentMethod === method.id 
+                                                ? `${method.color} text-white shadow-lg ring-2 ring-white scale-105` 
+                                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                            }
+                                        `}
+                                    >
+                                        <span className="text-2xl">{method.icon}</span>
+                                        <span className="text-xs text-center leading-tight font-bold">{method.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Affichage du mode sélectionné */}
+                            {selectedPaymentMethod && (
+                                <div className="mt-4 p-3 bg-gray-900 rounded border border-gray-700 text-center text-xs text-gray-300 sticky bottom-0">
+                                    <div className="font-semibold text-gray-400 mb-1">Sélectionné:</div>
+                                    <div className="font-bold text-green-400">{paymentMethods.find(m => m.id === selectedPaymentMethod)?.label}</div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* --- MODES DE PAIEMENT FIN --- */}
+
+                    {/* Modales Ajout d'Articles */}
+                    <AddSaleModal 
+                        isOpen={isAddSaleModalOpen}
+                        onClose={() => setIsAddSaleModalOpen(false)}
+                        onAddItem={handleAddSaleItem}
+                    />
+                    
+                    <AddRentalModal 
+                        isOpen={isAddRentalModalOpen}
+                        onClose={() => setIsAddRentalModalOpen(false)}
+                        onAddItem={handleAddRentalItem}
+                    />
+
+                    {/* Modale Gestion Clients */}
+                    <ClientManagementModal 
+                        isOpen={isClientModalOpen}
+                        onClose={() => setIsClientModalOpen(false)}
+                        clients={clients}
+                        onAddClient={handleAddClient}
+                        onSelectClient={handleSelectClient}
+                        generateClientNumber={generateClientNumber}
+                    />
+
+                    {/* --- MODALE HISTORIQUE & RAPPORTS --- */}
+                    {isHistoryOpen && (
+                        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[85vh] overflow-hidden flex flex-col">
+                                {/* Header */}
+                                <div className="p-4 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
+                                    <h2 className="text-xl font-bold text-white">📊 Historique & Rapports</h2>
+                                    <button 
+                                        onClick={() => setIsHistoryOpen(false)}
+                                        className="text-gray-400 hover:text-white text-2xl font-bold"
+                                    >×</button>
+                                </div>
+
+                                {/* Filtres */}
+                                <div className="p-4 bg-gray-850 border-b border-gray-700 flex gap-3">
+                                    <button 
+                                        onClick={() => setHistoryFilter('jour')}
+                                        className={`px-4 py-2 rounded-lg font-semibold transition ${
+                                            historyFilter === 'jour' 
+                                                ? 'bg-blue-600 text-white' 
+                                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        }`}
+                                    >📅 Jour</button>
+                                    <button 
+                                        onClick={() => setHistoryFilter('mois')}
+                                        className={`px-4 py-2 rounded-lg font-semibold transition ${
+                                            historyFilter === 'mois' 
+                                                ? 'bg-blue-600 text-white' 
+                                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        }`}
+                                    >📆 Mois</button>
+                                    <button 
+                                        onClick={() => setHistoryFilter('annee')}
+                                        className={`px-4 py-2 rounded-lg font-semibold transition ${
+                                            historyFilter === 'annee' 
+                                                ? 'bg-blue-600 text-white' 
+                                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        }`}
+                                    >📊 Année</button>
+                                </div>
+
+                                {/* Statistiques */}
+                                {(() => {
+                                    const stats = getStats();
+                                    return (
+                                        <div className="p-4 bg-gray-800 border-b border-gray-700 grid grid-cols-3 gap-4">
+                                            <div className="bg-green-900/30 p-3 rounded-lg border border-green-700">
+                                                <div className="text-xs text-gray-400">Revenu Total</div>
+                                                <div className="text-2xl font-bold text-green-400">{formatPrice(stats.totalRevenue)}</div>
+                                            </div>
+                                            <div className="bg-blue-900/30 p-3 rounded-lg border border-blue-700">
+                                                <div className="text-xs text-gray-400">Transactions</div>
+                                                <div className="text-2xl font-bold text-blue-400">{stats.totalTransactions}</div>
+                                            </div>
+                                            <div className="bg-purple-900/30 p-3 rounded-lg border border-purple-700">
+                                                <div className="text-xs text-gray-400">Articles Vendus</div>
+                                                <div className="text-2xl font-bold text-purple-400">{stats.totalItems}</div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Liste des Transactions */}
+                                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                                    {getFilteredTransactions().length === 0 ? (
+                                        <div className="text-center text-gray-500 py-8">
+                                            Aucune transaction pour cette période
+                                        </div>
+                                    ) : (
+                                        getFilteredTransactions().map(tx => (
+                                            <div key={tx.id} className="bg-gray-700 p-3 rounded-lg border border-gray-600 text-sm">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div>
+                                                        <div className="font-bold text-white">{tx.client} ({tx.clientNum})</div>
+                                                        <div className="text-xs text-gray-400">{new Date(tx.date).toLocaleString('fr-FR')}</div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="font-bold text-green-400">{formatPrice(tx.total)}</div>
+                                                        <div className="text-xs text-gray-400">{tx.paymentMethod}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-gray-300 ml-2">
+                                                    {tx.items.map((item, i) => (
+                                                        <div key={i}>{item.qty}x {item.name}</div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Footer */}
+                                <div className="p-4 bg-gray-900 border-t border-gray-700 flex justify-end gap-2">
+                                    <button 
+                                        onClick={() => setIsHistoryOpen(false)}
+                                        className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition"
+                                    >Fermer</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<POS />);
+    </script>
+</body>
+</html>
