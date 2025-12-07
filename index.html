@@ -679,7 +679,7 @@
             const [isHistoryOpen, setIsHistoryOpen] = useState(false);
             const [historyFilter, setHistoryFilter] = useState('jour'); // 'jour', 'mois', 'annee'
             const [isBackOfficeOpen, setIsBackOfficeOpen] = useState(false);
-            const [backOfficeTab, setBackOfficeTab] = useState('suppliers'); // 'suppliers', 'articles', 'reports'
+            const [backOfficeTab, setBackOfficeTab] = useState('dashboard'); // 'dashboard', 'suppliers', 'articles', 'stock', 'finances', 'clients', 'reports'
             const [suppliers, setSuppliers] = useState(() => {
                 const saved = localStorage.getItem('posSuppliers');
                 return saved ? JSON.parse(saved) : [
@@ -695,7 +695,158 @@
                 { id: 'globalpos', label: 'GlobalPos', icon: '📱', color: 'bg-indigo-600' },
             ];
 
-            // Fonction pour générer un numéro de client unique
+            // États pour la gestion avancée
+            const [productSuppliers, setProductSuppliers] = useState(() => {
+                const saved = localStorage.getItem('posProductSuppliers');
+                return saved ? JSON.parse(saved) : {};
+            });
+            const [productStock, setProductStock] = useState(() => {
+                const saved = localStorage.getItem('posProductStock');
+                return saved ? JSON.parse(saved) : {};
+            });
+            const [productCosts, setProductCosts] = useState(() => {
+                const saved = localStorage.getItem('posProductCosts');
+                return saved ? JSON.parse(saved) : {};
+            });
+            const [expenses, setExpenses] = useState(() => {
+                const saved = localStorage.getItem('posExpenses');
+                return saved ? JSON.parse(saved) : [];
+            });
+            const [stockMovements, setStockMovements] = useState(() => {
+                const saved = localStorage.getItem('posStockMovements');
+                return saved ? JSON.parse(saved) : [];
+            });
+            const [stockAlerts, setStockAlerts] = useState(() => {
+                const saved = localStorage.getItem('posStockAlerts');
+                return saved ? JSON.parse(saved) : {};
+            });
+
+            // Fonction pour enregistrer un mouvement de stock
+            const recordStockMovement = (productId, quantity, type, reason = '') => {
+                const movement = {
+                    id: `MOV${Date.now()}`,
+                    productId,
+                    productName: MOCK_PRODUCTS.find(p => p.id === productId)?.name || 'Unknown',
+                    quantity,
+                    type, // 'entrée' ou 'sortie'
+                    reason,
+                    date: new Date().toISOString(),
+                    timestamp: Date.now()
+                };
+                
+                const updated = [...stockMovements, movement];
+                setStockMovements(updated);
+                localStorage.setItem('posStockMovements', JSON.stringify(updated));
+                return movement;
+            };
+
+            // Fonction pour ajouter une dépense
+            const addExpense = (category, amount, description = '') => {
+                const expense = {
+                    id: `EXP${Date.now()}`,
+                    category,
+                    amount,
+                    description,
+                    date: new Date().toISOString(),
+                    timestamp: Date.now()
+                };
+                const updated = [...expenses, expense];
+                setExpenses(updated);
+                localStorage.setItem('posExpenses', JSON.stringify(updated));
+                saveToFirestore('expenses', expense);
+                return expense;
+            };
+
+            // Fonction pour calculer les statistiques financières
+            const getFinancialStats = (startDate, endDate) => {
+                const filteredTransactions = transactions.filter(t => {
+                    if (!t.date) return false;
+                    const tDate = new Date(t.date);
+                    return tDate >= startDate && tDate <= endDate;
+                });
+
+                const totalRevenue = filteredTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+                const totalTransactions = filteredTransactions.length;
+                
+                // Calcul du coût total (basé sur les coûts d'achat des produits)
+                const totalCost = filteredTransactions.reduce((sum, t) => {
+                    if (t.items && Array.isArray(t.items)) {
+                        return sum + t.items.reduce((itemSum, item) => {
+                            const cost = productCosts[item.id] || 0;
+                            return itemSum + (cost * (item.qty || item.quantity || 1));
+                        }, 0);
+                    }
+                    return sum;
+                }, 0);
+
+                // Dépenses dans la période
+                const periodExpenses = expenses.filter(e => {
+                    const eDate = new Date(e.date);
+                    return eDate >= startDate && eDate <= endDate;
+                });
+                const totalExpenses = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+                const grossProfit = totalRevenue - totalCost;
+                const netProfit = grossProfit - totalExpenses;
+                const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(2) : 0;
+
+                return {
+                    totalRevenue,
+                    totalCost,
+                    totalExpenses,
+                    grossProfit,
+                    netProfit,
+                    profitMargin,
+                    totalTransactions,
+                    periodExpenses
+                };
+            };
+
+            // Fonction pour calculer les points de fidélité
+            const calculateLoyaltyPoints = (clientId) => {
+                const clientTransactions = transactions.filter(t => t.client === clientId);
+                const totalSpent = clientTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+                // 1 point pour 1€ dépensé
+                return Math.floor(totalSpent);
+            };
+
+            // Fonction pour obtenir le segment client
+            const getClientSegment = (clientId) => {
+                const clientTransactions = transactions.filter(t => t.client === clientId);
+                const totalSpent = clientTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+                const transactionCount = clientTransactions.length;
+
+                if (totalSpent >= 5000 || transactionCount >= 50) {
+                    return { name: 'VIP', color: 'gold', icon: '👑' };
+                } else if (totalSpent >= 2000 || transactionCount >= 20) {
+                    return { name: 'Premium', color: 'purple', icon: '💎' };
+                } else if (totalSpent >= 500 || transactionCount >= 5) {
+                    return { name: 'Fidèle', color: 'blue', icon: '⭐' };
+                } else if (totalSpent > 0 || transactionCount > 0) {
+                    return { name: 'Régulier', color: 'green', icon: '✓' };
+                } else {
+                    return { name: 'Nouveau', color: 'gray', icon: '🆕' };
+                }
+            };
+
+            // Fonction pour obtenir l'historique d'achats d'un client
+            const getClientPurchaseHistory = (clientId) => {
+                return transactions.filter(t => t.client === clientId).sort((a, b) => {
+                    const dateA = new Date(a.date || 0).getTime();
+                    const dateB = new Date(b.date || 0).getTime();
+                    return dateB - dateA;
+                });
+            };
+
+            // Fonction pour ajouter des points de fidélité
+            const addLoyaltyPoints = (clientId, points) => {
+                setClients(prev => prev.map(c => 
+                    c.num === clientId 
+                        ? { ...c, loyaltyPoints: (c.loyaltyPoints || 0) + points }
+                        : c
+                ));
+            };
+
             const generateClientNumber = () => {
                 const maxNum = clients.length > 0 
                     ? Math.max(...clients.map(c => parseInt(c.num.split('-')[1])))
@@ -1520,8 +1671,8 @@
 
                     {/* --- MODALE BACK OFFICE --- */}
                     {isBackOfficeOpen && (
-                        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-                            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2">
+                            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full h-full max-w-full max-h-full overflow-hidden flex flex-col">
                                 {/* Header */}
                                 <div className="p-4 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
                                     <h2 className="text-2xl font-bold text-white">⚙️ Back Office</h2>
@@ -1532,10 +1683,18 @@
                                 </div>
 
                                 {/* Onglets */}
-                                <div className="flex border-b border-gray-700 bg-gray-850">
+                                <div className="flex border-b border-gray-700 bg-gray-850 overflow-x-auto">
+                                    <button 
+                                        onClick={() => setBackOfficeTab('dashboard')}
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                            backOfficeTab === 'dashboard' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >📊 Tableau de Bord</button>
                                     <button 
                                         onClick={() => setBackOfficeTab('suppliers')}
-                                        className={`px-6 py-3 font-semibold transition ${
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
                                             backOfficeTab === 'suppliers' 
                                                 ? 'text-blue-400 border-b-2 border-blue-400' 
                                                 : 'text-gray-400 hover:text-white'
@@ -1543,24 +1702,235 @@
                                     >📦 Fournisseurs</button>
                                     <button 
                                         onClick={() => setBackOfficeTab('articles')}
-                                        className={`px-6 py-3 font-semibold transition ${
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
                                             backOfficeTab === 'articles' 
                                                 ? 'text-blue-400 border-b-2 border-blue-400' 
                                                 : 'text-gray-400 hover:text-white'
                                         }`}
-                                    >🏷️ Articles</button>
+                                    >🏷️ Articles + Coûts</button>
+                                    <button 
+                                        onClick={() => setBackOfficeTab('stock')}
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                            backOfficeTab === 'stock' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >📦 Stock</button>
+                                    <button 
+                                        onClick={() => setBackOfficeTab('finances')}
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                            backOfficeTab === 'finances' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >💰 Finances</button>
+                                    <button 
+                                        onClick={() => setBackOfficeTab('clients')}
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                            backOfficeTab === 'clients' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >👥 CRM Clients</button>
                                     <button 
                                         onClick={() => setBackOfficeTab('reports')}
-                                        className={`px-6 py-3 font-semibold transition ${
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
                                             backOfficeTab === 'reports' 
                                                 ? 'text-blue-400 border-b-2 border-blue-400' 
                                                 : 'text-gray-400 hover:text-white'
                                         }`}
-                                    >📊 Rapports</button>
+                                    >📈 Rapports</button>
                                 </div>
 
                                 {/* Contenu */}
                                 <div className="flex-1 overflow-y-auto p-6">
+                                    {/* --- ONGLET DASHBOARD --- */}
+                                    {backOfficeTab === 'dashboard' && (
+                                        <div className="space-y-6">
+                                            <h2 className="text-3xl font-bold text-white mb-6">📊 Tableau de Bord Analytics</h2>
+                                            
+                                            {/* Métriques clés */}
+                                            <div className="grid grid-cols-4 gap-4">
+                                                <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-4 rounded-lg border border-blue-500">
+                                                    <div className="text-gray-300 text-sm font-semibold">Chiffre d'affaires total</div>
+                                                    <div className="text-3xl font-bold text-white mt-2">
+                                                        {transactions.reduce((sum, t) => sum + (t.total || 0), 0).toFixed(2)}€
+                                                    </div>
+                                                </div>
+                                                <div className="bg-gradient-to-br from-green-600 to-green-800 p-4 rounded-lg border border-green-500">
+                                                    <div className="text-gray-300 text-sm font-semibold">Nombre de transactions</div>
+                                                    <div className="text-3xl font-bold text-white mt-2">{transactions.length}</div>
+                                                </div>
+                                                <div className="bg-gradient-to-br from-purple-600 to-purple-800 p-4 rounded-lg border border-purple-500">
+                                                    <div className="text-gray-300 text-sm font-semibold">Ticket moyen</div>
+                                                    <div className="text-3xl font-bold text-white mt-2">
+                                                        {transactions.length > 0 
+                                                            ? (transactions.reduce((sum, t) => sum + (t.total || 0), 0) / transactions.length).toFixed(2)
+                                                            : '0.00'}€
+                                                    </div>
+                                                </div>
+                                                <div className="bg-gradient-to-br from-orange-600 to-orange-800 p-4 rounded-lg border border-orange-500">
+                                                    <div className="text-gray-300 text-sm font-semibold">Articles vendus</div>
+                                                    <div className="text-3xl font-bold text-white mt-2">
+                                                        {transactions.reduce((sum, t) => sum + (t.items?.length || 0), 0)}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Revenu par mode de paiement */}
+                                            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                <h3 className="text-xl font-bold text-white mb-4">💳 Revenu par mode de paiement</h3>
+                                                <div className="space-y-3">
+                                                    {(() => {
+                                                        const paymentBreakdown = {
+                                                            'especes': { total: 0, color: 'bg-green-600', label: '💵 Espèces' },
+                                                            'carte': { total: 0, color: 'bg-blue-600', label: '💳 Carte' },
+                                                            'cle-u': { total: 0, color: 'bg-purple-600', label: '🔑 Clé-U' },
+                                                            'cheque': { total: 0, color: 'bg-yellow-600', label: '📋 Chèque' },
+                                                            'globalpos': { total: 0, color: 'bg-red-600', label: '🌐 GlobalPOS' }
+                                                        };
+                                                        
+                                                        transactions.forEach(t => {
+                                                            if (paymentBreakdown[t.paymentMethod]) {
+                                                                paymentBreakdown[t.paymentMethod].total += t.total || 0;
+                                                            }
+                                                        });
+
+                                                        const totalRevenue = Object.values(paymentBreakdown).reduce((sum, p) => sum + p.total, 0);
+                                                        
+                                                        return Object.entries(paymentBreakdown).map(([method, data]) => {
+                                                            const percentage = totalRevenue > 0 ? (data.total / totalRevenue * 100).toFixed(1) : 0;
+                                                            return (
+                                                                <div key={method} className="space-y-2">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <span className="text-gray-300">{data.label}</span>
+                                                                        <span className="font-bold text-white">{data.total.toFixed(2)}€</span>
+                                                                    </div>
+                                                                    <div className="w-full bg-gray-700 rounded-full h-2">
+                                                                        <div 
+                                                                            className={`h-2 rounded-full ${data.color}`}
+                                                                            style={{width: `${percentage}%`}}
+                                                                        ></div>
+                                                                    </div>
+                                                                    <div className="text-right text-gray-400 text-sm">{percentage}%</div>
+                                                                </div>
+                                                            );
+                                                        });
+                                                    })()}
+                                                </div>
+                                            </div>
+
+                                            {/* Top 5 Produits */}
+                                            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                <h3 className="text-xl font-bold text-white mb-4">🏆 Top 5 Produits vendus</h3>
+                                                <div className="space-y-4">
+                                                    {(() => {
+                                                        const productCounts = {};
+                                                        
+                                                        transactions.forEach(t => {
+                                                            if (t.items && Array.isArray(t.items)) {
+                                                                t.items.forEach(item => {
+                                                                    const name = item.name || item.article || 'Sans nom';
+                                                                    productCounts[name] = (productCounts[name] || 0) + (item.quantity || 1);
+                                                                });
+                                                            }
+                                                        });
+                                                        
+                                                        const sortedProducts = Object.entries(productCounts)
+                                                            .sort((a, b) => b[1] - a[1])
+                                                            .slice(0, 5);
+
+                                                        return sortedProducts.length > 0 ? (
+                                                            sortedProducts.map((product, index) => (
+                                                                <div key={product[0]} className="flex items-center space-x-4">
+                                                                    <div className="bg-blue-600 rounded-full w-8 h-8 flex items-center justify-center font-bold text-white text-sm">
+                                                                        {index + 1}
+                                                                    </div>
+                                                                    <div className="flex-1">
+                                                                        <div className="font-semibold text-white">{product[0]}</div>
+                                                                        <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
+                                                                            <div 
+                                                                                className="bg-gradient-to-r from-blue-400 to-blue-600 h-2 rounded-full"
+                                                                                style={{width: `${(product[1] / (sortedProducts[0]?.[1] || 1) * 100).toFixed(0)}%`}}
+                                                                            ></div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="text-right">
+                                                                        <div className="font-bold text-white">{product[1]}</div>
+                                                                        <div className="text-gray-400 text-sm">unités</div>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        ) : (
+                                                            <div className="text-center text-gray-400 py-8">
+                                                                Aucune transaction enregistrée
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+
+                                            {/* Activité par jour/mois/année */}
+                                            <div className="grid grid-cols-3 gap-4">
+                                                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                    <h3 className="text-lg font-bold text-white mb-4">📅 Aujourd'hui</h3>
+                                                    {(() => {
+                                                        const today = new Date().toISOString().split('T')[0];
+                                                        const todayTransactions = transactions.filter(t => 
+                                                            t.date && t.date.startsWith(today)
+                                                        );
+                                                        return (
+                                                            <div className="space-y-2">
+                                                                <div className="text-2xl font-bold text-green-400">
+                                                                    {todayTransactions.reduce((sum, t) => sum + (t.total || 0), 0).toFixed(2)}€
+                                                                </div>
+                                                                <div className="text-gray-400 text-sm">{todayTransactions.length} transactions</div>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                    <h3 className="text-lg font-bold text-white mb-4">📆 Ce mois</h3>
+                                                    {(() => {
+                                                        const now = new Date();
+                                                        const monthTransactions = transactions.filter(t => {
+                                                            if (!t.date) return false;
+                                                            const tDate = new Date(t.date);
+                                                            return tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
+                                                        });
+                                                        return (
+                                                            <div className="space-y-2">
+                                                                <div className="text-2xl font-bold text-blue-400">
+                                                                    {monthTransactions.reduce((sum, t) => sum + (t.total || 0), 0).toFixed(2)}€
+                                                                </div>
+                                                                <div className="text-gray-400 text-sm">{monthTransactions.length} transactions</div>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                    <h3 className="text-lg font-bold text-white mb-4">📊 Cette année</h3>
+                                                    {(() => {
+                                                        const now = new Date();
+                                                        const yearTransactions = transactions.filter(t => {
+                                                            if (!t.date) return false;
+                                                            const tDate = new Date(t.date);
+                                                            return tDate.getFullYear() === now.getFullYear();
+                                                        });
+                                                        return (
+                                                            <div className="space-y-2">
+                                                                <div className="text-2xl font-bold text-purple-400">
+                                                                    {yearTransactions.reduce((sum, t) => sum + (t.total || 0), 0).toFixed(2)}€
+                                                                </div>
+                                                                <div className="text-gray-400 text-sm">{yearTransactions.length} transactions</div>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* --- ONGLET FOURNISSEURS --- */}
                                     {backOfficeTab === 'suppliers' && (
                                         <div className="space-y-4">
@@ -1619,24 +1989,770 @@
                                         </div>
                                     )}
 
-                                    {/* --- ONGLET ARTICLES --- */}
+                                    {/* --- ONGLET ARTICLES + COÛTS + FOURNISSEURS --- */}
                                     {backOfficeTab === 'articles' && (
-                                        <div className="space-y-4">
-                                            <h3 className="text-lg font-bold text-white">Articles en Catalogue</h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {MOCK_PRODUCTS.map(product => (
-                                                    <div key={product.id} className="bg-gray-700 p-4 rounded-lg border border-gray-600">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div className="font-bold text-white">{product.name}</div>
-                                                            <div className="text-xs font-mono text-gray-400">{product.barcode}</div>
+                                        <div className="space-y-6">
+                                            <div className="flex justify-between items-center">
+                                                <h2 className="text-2xl font-bold text-white">🏷️ Gestion des Articles & Fournisseurs</h2>
+                                            </div>
+
+                                            {/* Affichage de tous les articles */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-xl font-bold text-white">📦 Catalogue Complet</h3>
+                                                <div className="grid grid-cols-1 gap-4">
+                                                    {MOCK_PRODUCTS.map(product => {
+                                                        const supplier = productSuppliers[product.id];
+                                                        const cost = productCosts[product.id] || 0;
+                                                        const margin = product.price > 0 && cost > 0 
+                                                            ? ((product.price - cost) / product.price * 100).toFixed(1)
+                                                            : 0;
+                                                        const stock = productStock[product.id] || 0;
+
+                                                        return (
+                                                            <div key={product.id} className="bg-gray-800 p-6 rounded-lg border border-gray-700 hover:border-blue-500 transition">
+                                                                <div className="grid grid-cols-3 gap-4 mb-4">
+                                                                    {/* Infos produit */}
+                                                                    <div>
+                                                                        <div className="font-bold text-white text-lg">{product.name}</div>
+                                                                        <div className="text-xs font-mono text-gray-400 mt-1">Code: {product.barcode}</div>
+                                                                        <div className="text-sm text-gray-300 mt-3 space-y-1">
+                                                                            <div>📂 {product.category}</div>
+                                                                            <div>🔄 {product.isRentable ? '📍 Location' : '🛒 Vente'}</div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Prix et marge */}
+                                                                    <div>
+                                                                        <div className="text-sm text-gray-400 font-semibold mb-2">💰 Tarification</div>
+                                                                        <div className="space-y-2">
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Prix de vente</div>
+                                                                                <div className="text-xl font-bold text-green-400">{formatPrice(product.price)}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Coût d'achat</div>
+                                                                                <div className="text-lg font-bold text-yellow-400">{cost.toFixed(2)}€</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Marge</div>
+                                                                                <div className={`text-lg font-bold ${margin >= 30 ? 'text-green-400' : margin >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                                    {margin}%
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Fournisseur et stock */}
+                                                                    <div>
+                                                                        <div className="text-sm text-gray-400 font-semibold mb-2">📦 Fournisseur & Stock</div>
+                                                                        <div className="space-y-2">
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Fournisseur</div>
+                                                                                <select 
+                                                                                    value={supplier?.id || ''}
+                                                                                    onChange={(e) => {
+                                                                                        const suppId = e.target.value;
+                                                                                        if (suppId) {
+                                                                                            const sup = suppliers.find(s => s.id === suppId);
+                                                                                            setProductSuppliers(prev => ({
+                                                                                                ...prev,
+                                                                                                [product.id]: sup
+                                                                                            }));
+                                                                                            localStorage.setItem('posProductSuppliers', JSON.stringify({
+                                                                                                ...productSuppliers,
+                                                                                                [product.id]: sup
+                                                                                            }));
+                                                                                        }
+                                                                                    }}
+                                                                                    className="w-full px-2 py-1 bg-gray-700 text-white text-sm rounded border border-gray-600 focus:border-blue-500"
+                                                                                >
+                                                                                    <option value="">Choisir un fournisseur</option>
+                                                                                    {suppliers.map(sup => (
+                                                                                        <option key={sup.id} value={sup.id}>{sup.name}</option>
+                                                                                    ))}
+                                                                                </select>
+                                                                                {supplier && <div className="text-xs text-blue-300 mt-1">✅ {supplier.name}</div>}
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Stock actuel</div>
+                                                                                <div className="flex items-center space-x-2 mt-1">
+                                                                                    <input 
+                                                                                        type="number"
+                                                                                        min="0"
+                                                                                        value={stock}
+                                                                                        onChange={(e) => {
+                                                                                            const newStock = parseInt(e.target.value) || 0;
+                                                                                            setProductStock(prev => ({
+                                                                                                ...prev,
+                                                                                                [product.id]: newStock
+                                                                                            }));
+                                                                                            localStorage.setItem('posProductStock', JSON.stringify({
+                                                                                                ...productStock,
+                                                                                                [product.id]: newStock
+                                                                                            }));
+                                                                                        }}
+                                                                                        className="w-16 px-2 py-1 bg-gray-700 text-white text-sm rounded border border-gray-600 focus:border-blue-500"
+                                                                                    />
+                                                                                    <span className="text-sm text-gray-300">unités</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Input pour le coût d'achat */}
+                                                                <div className="border-t border-gray-700 pt-4">
+                                                                    <label className="block text-sm text-gray-400 font-semibold mb-2">💳 Entrer le coût d'achat (€)</label>
+                                                                    <div className="flex gap-2">
+                                                                        <input 
+                                                                            type="number"
+                                                                            step="0.01"
+                                                                            min="0"
+                                                                            value={cost}
+                                                                            onChange={(e) => {
+                                                                                const newCost = parseFloat(e.target.value) || 0;
+                                                                                setProductCosts(prev => ({
+                                                                                    ...prev,
+                                                                                    [product.id]: newCost
+                                                                                }));
+                                                                                localStorage.setItem('posProductCosts', JSON.stringify({
+                                                                                    ...productCosts,
+                                                                                    [product.id]: newCost
+                                                                                }));
+                                                                            }}
+                                                                            className="flex-1 px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-green-500"
+                                                                            placeholder="Coût d'achat"
+                                                                        />
+                                                                        <div className="flex items-center px-3 bg-gray-700 rounded border border-gray-600 text-gray-300">
+                                                                            Marge: <span className="ml-2 font-bold text-green-400">{margin}%</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET STOCK --- */}
+                                    {backOfficeTab === 'stock' && (
+                                        <div className="space-y-6">
+                                            <h2 className="text-2xl font-bold text-white">📦 Gestion de Stock</h2>
+
+                                            {/* Vue résumée - Alertes stock bas */}
+                                            <div className="bg-gradient-to-r from-red-900 to-red-800 rounded-lg border border-red-700 p-6">
+                                                <h3 className="text-lg font-bold text-white mb-4">⚠️ Articles en alerte stock</h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    {MOCK_PRODUCTS.map(product => {
+                                                        const stock = productStock[product.id] || 0;
+                                                        const alertLevel = stockAlerts[product.id] || 10;
+                                                        
+                                                        if (stock <= alertLevel) {
+                                                            return (
+                                                                <div key={product.id} className="bg-gray-800 p-4 rounded-lg border border-red-600">
+                                                                    <div className="flex justify-between items-start mb-2">
+                                                                        <div className="font-bold text-white">{product.name}</div>
+                                                                        <span className="px-2 py-1 bg-red-600 text-white text-xs font-bold rounded">ALERTE</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div className="text-sm text-gray-400">Stock actuel: <span className="text-red-400 font-bold text-lg">{stock}</span></div>
+                                                                        <div className="text-sm text-gray-400">Seuil: <span className="text-yellow-400 font-bold">{alertLevel}</span></div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })}
+                                                    {!MOCK_PRODUCTS.some(p => {
+                                                        const stock = productStock[p.id] || 0;
+                                                        const alertLevel = stockAlerts[p.id] || 10;
+                                                        return stock <= alertLevel;
+                                                    }) && (
+                                                        <div className="col-span-full text-center text-green-400 py-4">✅ Tous les stocks sont suffisants !</div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Gestion détaillée du stock */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-xl font-bold text-white">📊 Inventaire détaillé</h3>
+                                                <div className="grid grid-cols-1 gap-4">
+                                                    {MOCK_PRODUCTS.map(product => {
+                                                        const stock = productStock[product.id] || 0;
+                                                        const alertLevel = stockAlerts[product.id] || 10;
+                                                        const status = stock > alertLevel * 2 ? 'OK' : stock > alertLevel ? 'ATTENTION' : 'CRITIQUE';
+                                                        const statusColor = status === 'OK' ? 'text-green-400' : status === 'ATTENTION' ? 'text-yellow-400' : 'text-red-400';
+                                                        
+                                                        return (
+                                                            <div key={product.id} className="bg-gray-800 p-4 rounded-lg border border-gray-700 hover:border-blue-500 transition">
+                                                                <div className="grid grid-cols-4 gap-4 items-center">
+                                                                    {/* Infos produit */}
+                                                                    <div>
+                                                                        <div className="font-bold text-white">{product.name}</div>
+                                                                        <div className="text-xs text-gray-400 mt-1">{product.barcode}</div>
+                                                                    </div>
+
+                                                                    {/* Stock actuel */}
+                                                                    <div>
+                                                                        <div className="text-sm text-gray-400">Stock actuel</div>
+                                                                        <div className={`text-2xl font-bold ${statusColor}`}>{stock}</div>
+                                                                    </div>
+
+                                                                    {/* Seuil d'alerte */}
+                                                                    <div>
+                                                                        <div className="text-sm text-gray-400">Seuil d'alerte</div>
+                                                                        <input 
+                                                                            type="number"
+                                                                            min="0"
+                                                                            value={alertLevel}
+                                                                            onChange={(e) => {
+                                                                                const newAlert = parseInt(e.target.value) || 0;
+                                                                                setStockAlerts(prev => ({
+                                                                                    ...prev,
+                                                                                    [product.id]: newAlert
+                                                                                }));
+                                                                                localStorage.setItem('posStockAlerts', JSON.stringify({
+                                                                                    ...stockAlerts,
+                                                                                    [product.id]: newAlert
+                                                                                }));
+                                                                            }}
+                                                                            className="w-20 px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 focus:border-yellow-500"
+                                                                        />
+                                                                    </div>
+
+                                                                    {/* Boutons d'ajustement */}
+                                                                    <div className="flex gap-2">
+                                                                        <button 
+                                                                            onClick={() => {
+                                                                                const newStock = stock + 1;
+                                                                                setProductStock(prev => ({...prev, [product.id]: newStock}));
+                                                                                localStorage.setItem('posProductStock', JSON.stringify({...productStock, [product.id]: newStock}));
+                                                                                recordStockMovement(product.id, 1, 'entrée', 'Ajustement manuel');
+                                                                            }}
+                                                                            className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition"
+                                                                        >+1</button>
+                                                                        <button 
+                                                                            onClick={() => {
+                                                                                if (stock > 0) {
+                                                                                    const newStock = stock - 1;
+                                                                                    setProductStock(prev => ({...prev, [product.id]: newStock}));
+                                                                                    localStorage.setItem('posProductStock', JSON.stringify({...productStock, [product.id]: newStock}));
+                                                                                    recordStockMovement(product.id, 1, 'sortie', 'Ajustement manuel');
+                                                                                }
+                                                                            }}
+                                                                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition disabled:opacity-50"
+                                                                            disabled={stock === 0}
+                                                                        >-1</button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                            {/* Historique des mouvements */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-xl font-bold text-white">📜 Historique des mouvements</h3>
+                                                <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+                                                    {stockMovements.length > 0 ? (
+                                                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                                                            {[...stockMovements].reverse().slice(0, 50).map(movement => (
+                                                                <div key={movement.id} className={`p-3 rounded border-l-4 flex justify-between items-center ${
+                                                                    movement.type === 'entrée' 
+                                                                        ? 'bg-green-900/20 border-green-600' 
+                                                                        : 'bg-red-900/20 border-red-600'
+                                                                }`}>
+                                                                    <div className="flex-1">
+                                                                        <div className="font-semibold text-white">{movement.productName}</div>
+                                                                        <div className="text-sm text-gray-400">
+                                                                            {movement.reason} · {new Date(movement.date).toLocaleString('fr-FR')}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className={`text-lg font-bold ${movement.type === 'entrée' ? 'text-green-400' : 'text-red-400'}`}>
+                                                                        {movement.type === 'entrée' ? '+' : '-'}{movement.quantity}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
                                                         </div>
-                                                        <div className="text-sm text-gray-300 space-y-1">
-                                                            <div>📊 Catégorie: <span className="text-blue-300 font-semibold">{product.category}</span></div>
-                                                            <div>💰 Prix: <span className="text-green-300 font-semibold">{formatPrice(product.price)}</span></div>
-                                                            <div>🔄 Type: <span className="text-yellow-300 font-semibold">{product.isRentable ? 'Location' : 'Vente'}</span></div>
+                                                    ) : (
+                                                        <div className="text-center text-gray-400 py-8">Aucun mouvement enregistré</div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET FINANCES --- */}
+                                    {backOfficeTab === 'finances' && (
+                                        <div className="space-y-6">
+                                            <h2 className="text-2xl font-bold text-white">💰 Gestion Financière</h2>
+
+                                            {(() => {
+                                                // Bilan du jour
+                                                const today = new Date();
+                                                today.setHours(0, 0, 0, 0);
+                                                const tomorrowStart = new Date(today);
+                                                tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+                                                // Bilan du mois
+                                                const monthStart = new Date(today);
+                                                monthStart.setDate(1);
+                                                const monthEnd = new Date(today);
+                                                monthEnd.setDate(monthEnd.getDate() + 1);
+
+                                                // Bilan de l'année
+                                                const yearStart = new Date(today);
+                                                yearStart.setMonth(0, 1);
+                                                const yearEnd = new Date(today);
+                                                yearEnd.setDate(yearEnd.getDate() + 1);
+
+                                                const dailyStats = getFinancialStats(today, tomorrowStart);
+                                                const monthlyStats = getFinancialStats(monthStart, monthEnd);
+                                                const yearlyStats = getFinancialStats(yearStart, yearEnd);
+
+                                                return (
+                                                    <>
+                                                        {/* Bilans rapides */}
+                                                        <div className="grid grid-cols-3 gap-4">
+                                                            {/* Bilan du jour */}
+                                                            <div className="bg-gradient-to-br from-blue-900 to-blue-800 rounded-lg border border-blue-600 p-6">
+                                                                <h3 className="text-lg font-bold text-white mb-4">📅 Bilan du jour</h3>
+                                                                <div className="space-y-3">
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Chiffre d'affaires</div>
+                                                                        <div className="text-2xl font-bold text-green-400">{dailyStats.totalRevenue.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Coûts produits</div>
+                                                                        <div className="text-lg text-yellow-400">{dailyStats.totalCost.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Dépenses</div>
+                                                                        <div className="text-lg text-red-400">{dailyStats.totalExpenses.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div className="border-t border-blue-700 pt-3">
+                                                                        <div className="text-xs text-gray-300">Bénéfice net</div>
+                                                                        <div className={`text-2xl font-bold ${dailyStats.netProfit >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                                                            {dailyStats.netProfit.toFixed(2)}€
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-400 mt-1">Marge: {dailyStats.profitMargin}%</div>
+                                                                    </div>
+                                                                    <div className="text-xs text-gray-400 mt-2">{dailyStats.totalTransactions} transactions</div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Bilan du mois */}
+                                                            <div className="bg-gradient-to-br from-purple-900 to-purple-800 rounded-lg border border-purple-600 p-6">
+                                                                <h3 className="text-lg font-bold text-white mb-4">📆 Bilan du mois</h3>
+                                                                <div className="space-y-3">
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Chiffre d'affaires</div>
+                                                                        <div className="text-2xl font-bold text-green-400">{monthlyStats.totalRevenue.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Coûts produits</div>
+                                                                        <div className="text-lg text-yellow-400">{monthlyStats.totalCost.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Dépenses</div>
+                                                                        <div className="text-lg text-red-400">{monthlyStats.totalExpenses.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div className="border-t border-purple-700 pt-3">
+                                                                        <div className="text-xs text-gray-300">Bénéfice net</div>
+                                                                        <div className={`text-2xl font-bold ${monthlyStats.netProfit >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                                                            {monthlyStats.netProfit.toFixed(2)}€
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-400 mt-1">Marge: {monthlyStats.profitMargin}%</div>
+                                                                    </div>
+                                                                    <div className="text-xs text-gray-400 mt-2">{monthlyStats.totalTransactions} transactions</div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Bilan de l'année */}
+                                                            <div className="bg-gradient-to-br from-orange-900 to-orange-800 rounded-lg border border-orange-600 p-6">
+                                                                <h3 className="text-lg font-bold text-white mb-4">📊 Bilan de l'année</h3>
+                                                                <div className="space-y-3">
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Chiffre d'affaires</div>
+                                                                        <div className="text-2xl font-bold text-green-400">{yearlyStats.totalRevenue.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Coûts produits</div>
+                                                                        <div className="text-lg text-yellow-400">{yearlyStats.totalCost.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs text-gray-300">Dépenses</div>
+                                                                        <div className="text-lg text-red-400">{yearlyStats.totalExpenses.toFixed(2)}€</div>
+                                                                    </div>
+                                                                    <div className="border-t border-orange-700 pt-3">
+                                                                        <div className="text-xs text-gray-300">Bénéfice net</div>
+                                                                        <div className={`text-2xl font-bold ${yearlyStats.netProfit >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                                                            {yearlyStats.netProfit.toFixed(2)}€
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-400 mt-1">Marge: {yearlyStats.profitMargin}%</div>
+                                                                    </div>
+                                                                    <div className="text-xs text-gray-400 mt-2">{yearlyStats.totalTransactions} transactions</div>
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+
+                                                        {/* Gestion des dépenses */}
+                                                        <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                            <h3 className="text-xl font-bold text-white mb-4">📋 Enregistrer une dépense</h3>
+                                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                                                <select 
+                                                                    id="expenseCategory"
+                                                                    defaultValue="autre"
+                                                                    className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500"
+                                                                >
+                                                                    <option value="salaires">👥 Salaires & Charges</option>
+                                                                    <option value="loyer">🏠 Loyer</option>
+                                                                    <option value="fournitures">📦 Fournitures</option>
+                                                                    <option value="maintenance">🔧 Maintenance & Réparations</option>
+                                                                    <option value="transport">🚚 Transport & Logistique</option>
+                                                                    <option value="utilities">💡 Électricité & Eau</option>
+                                                                    <option value="assurance">🛡️ Assurance</option>
+                                                                    <option value="marketing">📢 Marketing & Publicité</option>
+                                                                    <option value="autre">📌 Autre</option>
+                                                                </select>
+                                                                <input 
+                                                                    type="number"
+                                                                    id="expenseAmount"
+                                                                    placeholder="Montant (€)"
+                                                                    step="0.01"
+                                                                    min="0"
+                                                                    className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500"
+                                                                />
+                                                                <input 
+                                                                    type="text"
+                                                                    id="expenseDescription"
+                                                                    placeholder="Description (optionnel)"
+                                                                    className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500"
+                                                                />
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        const category = document.getElementById('expenseCategory').value;
+                                                                        const amount = parseFloat(document.getElementById('expenseAmount').value);
+                                                                        const description = document.getElementById('expenseDescription').value;
+                                                                        
+                                                                        if (amount > 0) {
+                                                                            addExpense(category, amount, description);
+                                                                            document.getElementById('expenseAmount').value = '';
+                                                                            document.getElementById('expenseDescription').value = '';
+                                                                            alert('Dépense enregistrée !');
+                                                                        }
+                                                                    }}
+                                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded transition"
+                                                                >
+                                                                    ✓ Ajouter
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Historique des dépenses */}
+                                                        <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                            <h3 className="text-xl font-bold text-white mb-4">📜 Historique des dépenses</h3>
+                                                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                                {expenses.length > 0 ? (
+                                                                    [...expenses].reverse().map(expense => (
+                                                                        <div key={expense.id} className="bg-gray-700 p-3 rounded border-l-4 border-red-600 flex justify-between items-center hover:bg-gray-650 transition">
+                                                                            <div className="flex-1">
+                                                                                <div className="font-semibold text-white">{expense.category}</div>
+                                                                                <div className="text-sm text-gray-400">{expense.description || 'Aucune description'}</div>
+                                                                                <div className="text-xs text-gray-500">{new Date(expense.date).toLocaleString('fr-FR')}</div>
+                                                                            </div>
+                                                                            <div className="text-lg font-bold text-red-400">-{expense.amount.toFixed(2)}€</div>
+                                                                        </div>
+                                                                    ))
+                                                                ) : (
+                                                                    <div className="text-center text-gray-400 py-8">Aucune dépense enregistrée</div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Rapports TVA */}
+                                                        <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                            <h3 className="text-xl font-bold text-white mb-4">🧾 Rapports TVA</h3>
+                                                            <div className="grid grid-cols-3 gap-4">
+                                                                <div>
+                                                                    <div className="text-sm text-gray-400 font-semibold mb-3">Taux TVA standard: 20%</div>
+                                                                    <div className="space-y-2">
+                                                                        <div className="flex justify-between">
+                                                                            <span className="text-gray-300">CA journalier TTC:</span>
+                                                                            <span className="text-white font-bold">{dailyStats.totalRevenue.toFixed(2)}€</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between bg-gray-700 p-2 rounded">
+                                                                            <span className="text-gray-300">CA HT:</span>
+                                                                            <span className="text-green-400 font-bold">{(dailyStats.totalRevenue / 1.20).toFixed(2)}€</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between bg-blue-900/30 p-2 rounded border border-blue-700">
+                                                                            <span className="text-gray-300">TVA due:</span>
+                                                                            <span className="text-blue-400 font-bold">{(dailyStats.totalRevenue - dailyStats.totalRevenue / 1.20).toFixed(2)}€</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div>
+                                                                    <div className="text-sm text-gray-400 font-semibold mb-3">Mensuel</div>
+                                                                    <div className="space-y-2">
+                                                                        <div className="flex justify-between">
+                                                                            <span className="text-gray-300">CA mensuel TTC:</span>
+                                                                            <span className="text-white font-bold">{monthlyStats.totalRevenue.toFixed(2)}€</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between bg-gray-700 p-2 rounded">
+                                                                            <span className="text-gray-300">CA HT:</span>
+                                                                            <span className="text-green-400 font-bold">{(monthlyStats.totalRevenue / 1.20).toFixed(2)}€</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between bg-blue-900/30 p-2 rounded border border-blue-700">
+                                                                            <span className="text-gray-300">TVA due:</span>
+                                                                            <span className="text-blue-400 font-bold">{(monthlyStats.totalRevenue - monthlyStats.totalRevenue / 1.20).toFixed(2)}€</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div>
+                                                                    <div className="text-sm text-gray-400 font-semibold mb-3">Annuel</div>
+                                                                    <div className="space-y-2">
+                                                                        <div className="flex justify-between">
+                                                                            <span className="text-gray-300">CA annuel TTC:</span>
+                                                                            <span className="text-white font-bold">{yearlyStats.totalRevenue.toFixed(2)}€</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between bg-gray-700 p-2 rounded">
+                                                                            <span className="text-gray-300">CA HT:</span>
+                                                                            <span className="text-green-400 font-bold">{(yearlyStats.totalRevenue / 1.20).toFixed(2)}€</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between bg-blue-900/30 p-2 rounded border border-blue-700">
+                                                                            <span className="text-gray-300">TVA due:</span>
+                                                                            <span className="text-blue-400 font-bold">{(yearlyStats.totalRevenue - yearlyStats.totalRevenue / 1.20).toFixed(2)}€</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET CRM CLIENTS --- */}
+                                    {backOfficeTab === 'clients' && (
+                                        <div className="space-y-6">
+                                            <h2 className="text-2xl font-bold text-white">👥 Gestion CRM Clients</h2>
+
+                                            {/* Vue d'ensemble clients par segment */}
+                                            <div className="grid grid-cols-5 gap-4">
+                                                {(() => {
+                                                    const segments = {
+                                                        'VIP': { icon: '👑', color: 'from-yellow-900 to-yellow-800', border: 'border-yellow-600', count: 0 },
+                                                        'Premium': { icon: '💎', color: 'from-purple-900 to-purple-800', border: 'border-purple-600', count: 0 },
+                                                        'Fidèle': { icon: '⭐', color: 'from-blue-900 to-blue-800', border: 'border-blue-600', count: 0 },
+                                                        'Régulier': { icon: '✓', color: 'from-green-900 to-green-800', border: 'border-green-600', count: 0 },
+                                                        'Nouveau': { icon: '🆕', color: 'from-gray-700 to-gray-800', border: 'border-gray-600', count: 0 }
+                                                    };
+
+                                                    clients.forEach(client => {
+                                                        const segment = getClientSegment(client.num);
+                                                        segments[segment.name].count++;
+                                                    });
+
+                                                    return Object.entries(segments).map(([name, data]) => (
+                                                        <div key={name} className={`bg-gradient-to-br ${data.color} rounded-lg border ${data.border} p-4`}>
+                                                            <div className="text-2xl mb-2">{data.icon}</div>
+                                                            <div className="text-sm text-gray-300">{name}</div>
+                                                            <div className="text-3xl font-bold text-white mt-2">{data.count}</div>
+                                                        </div>
+                                                    ));
+                                                })()}
+                                            </div>
+
+                                            {/* Liste détaillée des clients */}
+                                            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                <h3 className="text-xl font-bold text-white mb-4">📋 Détail des clients</h3>
+                                                <div className="space-y-3">
+                                                    {clients.map(client => {
+                                                        const segment = getClientSegment(client.num);
+                                                        const loyaltyPoints = calculateLoyaltyPoints(client.num);
+                                                        const purchaseHistory = getClientPurchaseHistory(client.num);
+                                                        const totalSpent = purchaseHistory.reduce((sum, t) => sum + (t.total || 0), 0);
+
+                                                        return (
+                                                            <details key={client.num} className="bg-gray-700 rounded-lg border border-gray-600 hover:border-blue-500 transition cursor-pointer group">
+                                                                <summary className="p-4 font-semibold text-white flex justify-between items-center">
+                                                                    <div className="flex items-center gap-4 flex-1">
+                                                                        <div className="text-2xl">{segment.icon}</div>
+                                                                        <div>
+                                                                            <div className="font-bold text-lg">{client.name}</div>
+                                                                            <div className="text-sm text-gray-400">{client.num} • 📧 {client.email}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-6 mr-4">
+                                                                        <div className="text-right">
+                                                                            <div className="text-xs text-gray-400">Segment</div>
+                                                                            <div className="font-bold text-amber-400">{segment.name}</div>
+                                                                        </div>
+                                                                        <div className="text-right">
+                                                                            <div className="text-xs text-gray-400">Points fidélité</div>
+                                                                            <div className="font-bold text-green-400">{loyaltyPoints} pts</div>
+                                                                        </div>
+                                                                    </div>
+                                                                </summary>
+                                                                <div className="px-4 pb-4 border-t border-gray-600 pt-4 space-y-4">
+                                                                    {/* Info client */}
+                                                                    <div className="grid grid-cols-3 gap-4">
+                                                                        <div>
+                                                                            <div className="text-xs text-gray-400 font-semibold">📞 Téléphone</div>
+                                                                            <div className="text-white mt-1">{client.phone || 'Non renseigné'}</div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div className="text-xs text-gray-400 font-semibold">🏠 Adresse</div>
+                                                                            <div className="text-white mt-1">{client.address || 'Non renseignée'}</div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div className="text-xs text-gray-400 font-semibold">📅 Depuis</div>
+                                                                            <div className="text-white mt-1">{client.joinDate || 'Non renseigné'}</div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Statistiques */}
+                                                                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-600">
+                                                                        <div className="text-sm font-semibold text-gray-300 mb-3">📊 Statistiques d'achat</div>
+                                                                        <div className="grid grid-cols-4 gap-4">
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Total dépensé</div>
+                                                                                <div className="text-xl font-bold text-green-400">{totalSpent.toFixed(2)}€</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Nb transactions</div>
+                                                                                <div className="text-xl font-bold text-blue-400">{purchaseHistory.length}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Ticket moyen</div>
+                                                                                <div className="text-xl font-bold text-purple-400">
+                                                                                    {purchaseHistory.length > 0 
+                                                                                        ? (totalSpent / purchaseHistory.length).toFixed(2)
+                                                                                        : 0}€
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs text-gray-400">Fidélité</div>
+                                                                                <div className="text-xl font-bold text-amber-400">{loyaltyPoints} pts</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Historique d'achats */}
+                                                                    <div>
+                                                                        <div className="text-sm font-semibold text-gray-300 mb-3">📜 Historique d'achats</div>
+                                                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                                            {purchaseHistory.length > 0 ? (
+                                                                                purchaseHistory.map((transaction, idx) => (
+                                                                                    <div key={idx} className="bg-gray-800 p-3 rounded border-l-4 border-blue-600 flex justify-between items-center text-sm">
+                                                                                        <div>
+                                                                                            <div className="text-gray-300">
+                                                                                                {transaction.items?.length || 0} article(s) • 
+                                                                                                <span className="text-gray-500 ml-2">{new Date(transaction.date).toLocaleString('fr-FR')}</span>
+                                                                                            </div>
+                                                                                            <div className="text-xs text-gray-500 mt-1">
+                                                                                                {transaction.items?.map(i => i.name || i.article).join(', ')}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div className="text-right">
+                                                                                            <div className="font-bold text-green-400">{(transaction.total || 0).toFixed(2)}€</div>
+                                                                                            <div className="text-xs text-gray-500">{transaction.paymentMethod}</div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))
+                                                                            ) : (
+                                                                                <div className="text-center text-gray-400 py-4">Aucune transaction</div>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Actions */}
+                                                                    <div className="flex gap-2 pt-4 border-t border-gray-600">
+                                                                        <button 
+                                                                            onClick={() => {
+                                                                                const points = prompt(`Ajouter des points de fidélité (actuel: ${loyaltyPoints}):`);
+                                                                                if (points && !isNaN(points)) {
+                                                                                    addLoyaltyPoints(client.num, parseInt(points));
+                                                                                }
+                                                                            }}
+                                                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition"
+                                                                        >
+                                                                            ➕ Points
+                                                                        </button>
+                                                                        <button 
+                                                                            onClick={() => {
+                                                                                const newEmail = prompt('Nouvelle adresse email:', client.email);
+                                                                                if (newEmail) {
+                                                                                    setClients(prev => prev.map(c => 
+                                                                                        c.num === client.num ? { ...c, email: newEmail } : c
+                                                                                    ));
+                                                                                }
+                                                                            }}
+                                                                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition"
+                                                                        >
+                                                                            ✏️ Modifier
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </details>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                            {/* Vue Segmentation */}
+                                            <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                <h3 className="text-xl font-bold text-white mb-4">🎯 Analyse de Segmentation</h3>
+                                                <div className="space-y-4">
+                                                    {(() => {
+                                                        const segmentDetails = {
+                                                            'VIP': { clients: [], description: 'Top clients (CA ≥ 5000€ ou ≥ 50 transactions)' },
+                                                            'Premium': { clients: [], description: 'Gros clients (CA ≥ 2000€ ou ≥ 20 transactions)' },
+                                                            'Fidèle': { clients: [], description: 'Clients réguliers (CA ≥ 500€ ou ≥ 5 transactions)' },
+                                                            'Régulier': { clients: [], description: 'Clients avec achat (CA > 0)' },
+                                                            'Nouveau': { clients: [], description: 'Pas encore acheté' }
+                                                        };
+
+                                                        clients.forEach(client => {
+                                                            const segment = getClientSegment(client.num);
+                                                            segmentDetails[segment.name].clients.push(client);
+                                                        });
+
+                                                        return Object.entries(segmentDetails).map(([name, data]) => {
+                                                            const avgValue = data.clients.length > 0
+                                                                ? data.clients.reduce((sum, c) => {
+                                                                    const transactions = getClientPurchaseHistory(c.num);
+                                                                    return sum + transactions.reduce((s, t) => s + (t.total || 0), 0);
+                                                                }, 0) / data.clients.length
+                                                                : 0;
+
+                                                            return (
+                                                                <div key={name} className="bg-gray-700 p-4 rounded-lg border border-gray-600">
+                                                                    <div className="flex justify-between items-start mb-2">
+                                                                        <div>
+                                                                            <div className="font-bold text-white text-lg">{name}</div>
+                                                                            <div className="text-sm text-gray-400">{data.description}</div>
+                                                                        </div>
+                                                                        <div className="text-right">
+                                                                            <div className="text-2xl font-bold text-blue-400">{data.clients.length}</div>
+                                                                            <div className="text-xs text-gray-400">clients</div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between pt-2 border-t border-gray-600">
+                                                                        <span className="text-sm text-gray-400">Valeur moyenne par client</span>
+                                                                        <span className="text-lg font-bold text-green-400">{avgValue.toFixed(2)}€</span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        });
+                                                    })()}
+                                                </div>
                                             </div>
                                         </div>
                                     )}
