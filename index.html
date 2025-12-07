@@ -12,6 +12,10 @@
     
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"></script>
+
     <style>
         /* Styles pour le mode Dark */
         ::-webkit-scrollbar { width: 6px; }
@@ -95,6 +99,53 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
+
+        // --- INITIALISATION FIREBASE ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCJbnlwr0mawraiMZg5bxhJAGTU50Athk4",
+            authDomain: "pos-sport.firebaseapp.com",
+            projectId: "pos-sport",
+            storageBucket: "pos-sport.firebasestorage.app",
+            messagingSenderId: "1097156311402",
+            appId: "1:1097156311402:web:46ba58865996e471b70d13",
+            measurementId: "G-NVM7ZNZZYB"
+        };
+
+        let db = null;
+        try {
+            const app = firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore(app);
+            console.log('✅ Firebase initialisé avec succès');
+        } catch (error) {
+            console.warn('⚠️ Firebase non disponible (mode hors ligne):', error.message);
+        }
+
+        // --- FONCTIONS DE SAUVEGARDE FIRESTORE ---
+        const saveToFirestore = async (collection, data) => {
+            if (!db) {
+                console.warn('Firebase non disponible, données sauvegardées localement');
+                return;
+            }
+            try {
+                await db.collection(collection).add({
+                    ...data,
+                    timestamp: new Date()
+                });
+                console.log(`✅ ${collection} sauvegardé dans Firestore`);
+            } catch (error) {
+                console.error(`❌ Erreur Firestore ${collection}:`, error);
+            }
+        };
+
+        const updateFirestore = async (collection, docId, data) => {
+            if (!db) return;
+            try {
+                await db.collection(collection).doc(docId).update(data);
+                console.log(`✅ ${collection} mis à jour`);
+            } catch (error) {
+                console.error(`❌ Erreur mise à jour ${collection}:`, error);
+            }
+        };
 
         // --- COMPOSANT MODALE AJOUT ARTICLE EN VENTE ---
         const AddSaleModal = ({ isOpen, onClose, onAddItem }) => {
@@ -627,8 +678,15 @@
             });
             const [isHistoryOpen, setIsHistoryOpen] = useState(false);
             const [historyFilter, setHistoryFilter] = useState('jour'); // 'jour', 'mois', 'annee'
-
-            // Modes de paiement disponibles
+            const [isBackOfficeOpen, setIsBackOfficeOpen] = useState(false);
+            const [backOfficeTab, setBackOfficeTab] = useState('suppliers'); // 'suppliers', 'articles', 'reports'
+            const [suppliers, setSuppliers] = useState(() => {
+                const saved = localStorage.getItem('posSuppliers');
+                return saved ? JSON.parse(saved) : [
+                    { id: 'SUP001', name: 'Rossignol Ski', email: 'contact@rossignol.com', phone: '04 50 00 00 00', country: 'France' },
+                    { id: 'SUP002', name: 'Salomon Sports', email: 'info@salomon.com', phone: '04 50 11 11 11', country: 'France' },
+                ];
+            });
             const paymentMethods = [
                 { id: 'especes', label: 'Espèces', icon: '💵', color: 'bg-green-600' },
                 { id: 'carte', label: 'Carte Bancaire', icon: '💳', color: 'bg-blue-600' },
@@ -648,6 +706,8 @@
             const handleAddClient = (newClient) => {
                 setClients(prev => [...prev, newClient]);
                 setSelectedClient(newClient);
+                // 🔥 Sauvegarder dans Firebase
+                saveToFirestore('clients', newClient);
             };
 
             const handleSelectClient = (client) => {
@@ -737,6 +797,8 @@
                 
                 // Ajouter au catalogue
                 MOCK_PRODUCTS.push(newProduct);
+                // 🔥 Sauvegarder dans Firebase
+                saveToFirestore('products', newProduct);
                 
                 // Créer l'article pour le panier
                 const newItem = {
@@ -772,6 +834,8 @@
                 
                 // Ajouter au catalogue
                 MOCK_PRODUCTS.push(newProduct);
+                // 🔥 Sauvegarder dans Firebase
+                saveToFirestore('products', newProduct);
                 
                 // Créer l'article pour le panier
                 const newItem = {
@@ -833,12 +897,15 @@
                 setTransactions(updatedTransactions);
                 localStorage.setItem('posTransactions', JSON.stringify(updatedTransactions));
 
+                // 🔥 Sauvegarder dans Firebase
+                saveToFirestore('transactions', newTransaction);
+
                 // Vider le panier et réinitialiser
                 setCart([]);
                 setSelectedPaymentMethod(null);
                 setSelectedClient(null);
 
-                alert('✅ Transaction enregistrée avec succès!');
+                alert('✅ Transaction enregistrée avec succès! (Sauvegardée localement + Cloud)');
             };
 
             // Filtrer les transactions par date
@@ -1034,7 +1101,16 @@
                     <div className="w-1/4 flex flex-col bg-gray-800 border-r border-gray-700 shadow-2xl z-10 relative">
                         <div className="p-4 bg-gray-900 text-white flex justify-between items-center shadow-md">
                             <h1 className="font-extrabold text-2xl text-green-400">POS Sport 🎿</h1>
-                            <div className="text-xs text-gray-400">Ticket #2024-88</div>
+                            <div className="flex items-center space-x-3">
+                                <button 
+                                    onClick={() => setIsBackOfficeOpen(true)}
+                                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded transition"
+                                    title="Accéder au back office"
+                                >
+                                    ⚙️ Back Office
+                                </button>
+                                <div className="text-xs text-gray-400">Ticket #2024-88</div>
+                            </div>
                         </div>
 
                         {/* Champ de Scan Code-Barre */}
@@ -1435,6 +1511,162 @@
                                 <div className="p-4 bg-gray-900 border-t border-gray-700 flex justify-end gap-2">
                                     <button 
                                         onClick={() => setIsHistoryOpen(false)}
+                                        className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition"
+                                    >Fermer</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* --- MODALE BACK OFFICE --- */}
+                    {isBackOfficeOpen && (
+                        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+                                {/* Header */}
+                                <div className="p-4 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
+                                    <h2 className="text-2xl font-bold text-white">⚙️ Back Office</h2>
+                                    <button 
+                                        onClick={() => setIsBackOfficeOpen(false)}
+                                        className="text-gray-400 hover:text-white text-2xl font-bold"
+                                    >×</button>
+                                </div>
+
+                                {/* Onglets */}
+                                <div className="flex border-b border-gray-700 bg-gray-850">
+                                    <button 
+                                        onClick={() => setBackOfficeTab('suppliers')}
+                                        className={`px-6 py-3 font-semibold transition ${
+                                            backOfficeTab === 'suppliers' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >📦 Fournisseurs</button>
+                                    <button 
+                                        onClick={() => setBackOfficeTab('articles')}
+                                        className={`px-6 py-3 font-semibold transition ${
+                                            backOfficeTab === 'articles' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >🏷️ Articles</button>
+                                    <button 
+                                        onClick={() => setBackOfficeTab('reports')}
+                                        className={`px-6 py-3 font-semibold transition ${
+                                            backOfficeTab === 'reports' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >📊 Rapports</button>
+                                </div>
+
+                                {/* Contenu */}
+                                <div className="flex-1 overflow-y-auto p-6">
+                                    {/* --- ONGLET FOURNISSEURS --- */}
+                                    {backOfficeTab === 'suppliers' && (
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center mb-4">
+                                                <h3 className="text-lg font-bold text-white">Gestion des Fournisseurs</h3>
+                                                <button 
+                                                    onClick={() => {
+                                                        const newSupplier = {
+                                                            id: `SUP${String(suppliers.length + 1).padStart(3, '0')}`,
+                                                            name: prompt('Nom du fournisseur:') || 'Nouveau Fournisseur',
+                                                            email: prompt('Email:') || '',
+                                                            phone: prompt('Téléphone:') || '',
+                                                            country: prompt('Pays:') || 'France'
+                                                        };
+                                                        const updated = [...suppliers, newSupplier];
+                                                        setSuppliers(updated);
+                                                        localStorage.setItem('posSuppliers', JSON.stringify(updated));
+                                                        // 🔥 Sauvegarder dans Firebase
+                                                        saveToFirestore('suppliers', newSupplier);
+                                                    }}
+                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded transition"
+                                                >
+                                                    + Ajouter Fournisseur
+                                                </button>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 gap-3">
+                                                {suppliers.map(supplier => (
+                                                    <div key={supplier.id} className="bg-gray-700 p-4 rounded-lg border border-gray-600 hover:border-blue-500 transition">
+                                                        <div className="flex justify-between items-start">
+                                                            <div className="flex-1">
+                                                                <div className="font-bold text-white text-lg">{supplier.name}</div>
+                                                                <div className="text-sm text-gray-400 mt-2 space-y-1">
+                                                                    <div>📧 {supplier.email}</div>
+                                                                    <div>📞 {supplier.phone}</div>
+                                                                    <div>🌍 {supplier.country}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <div className="font-mono text-blue-400 font-semibold">{supplier.id}</div>
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        const updated = suppliers.filter(s => s.id !== supplier.id);
+                                                                        setSuppliers(updated);
+                                                                        localStorage.setItem('posSuppliers', JSON.stringify(updated));
+                                                                    }}
+                                                                    className="text-xs text-red-400 hover:text-red-300 mt-2"
+                                                                >
+                                                                    Supprimer
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET ARTICLES --- */}
+                                    {backOfficeTab === 'articles' && (
+                                        <div className="space-y-4">
+                                            <h3 className="text-lg font-bold text-white">Articles en Catalogue</h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {MOCK_PRODUCTS.map(product => (
+                                                    <div key={product.id} className="bg-gray-700 p-4 rounded-lg border border-gray-600">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div className="font-bold text-white">{product.name}</div>
+                                                            <div className="text-xs font-mono text-gray-400">{product.barcode}</div>
+                                                        </div>
+                                                        <div className="text-sm text-gray-300 space-y-1">
+                                                            <div>📊 Catégorie: <span className="text-blue-300 font-semibold">{product.category}</span></div>
+                                                            <div>💰 Prix: <span className="text-green-300 font-semibold">{formatPrice(product.price)}</span></div>
+                                                            <div>🔄 Type: <span className="text-yellow-300 font-semibold">{product.isRentable ? 'Location' : 'Vente'}</span></div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET RAPPORTS --- */}
+                                    {backOfficeTab === 'reports' && (
+                                        <div className="space-y-4">
+                                            <h3 className="text-lg font-bold text-white">Rapports de Vente</h3>
+                                            <div className="grid grid-cols-3 gap-4">
+                                                <div className="bg-green-900/30 p-4 rounded-lg border border-green-700">
+                                                    <div className="text-sm text-gray-400">Total Articles</div>
+                                                    <div className="text-3xl font-bold text-green-400">{MOCK_PRODUCTS.length}</div>
+                                                </div>
+                                                <div className="bg-blue-900/30 p-4 rounded-lg border border-blue-700">
+                                                    <div className="text-sm text-gray-400">Fournisseurs</div>
+                                                    <div className="text-3xl font-bold text-blue-400">{suppliers.length}</div>
+                                                </div>
+                                                <div className="bg-purple-900/30 p-4 rounded-lg border border-purple-700">
+                                                    <div className="text-sm text-gray-400">Clients</div>
+                                                    <div className="text-3xl font-bold text-purple-400">{clients.length}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Footer */}
+                                <div className="p-4 bg-gray-900 border-t border-gray-700 flex justify-end">
+                                    <button 
+                                        onClick={() => setIsBackOfficeOpen(false)}
                                         className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition"
                                     >Fermer</button>
                                 </div>
