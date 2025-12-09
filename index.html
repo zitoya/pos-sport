@@ -12,34 +12,12 @@
     
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Firebase v9+ (Modular) -->
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-        import { getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+    <!-- SheetJS pour lire les fichiers Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-        // Configuration Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyCJbnlwr0mawraiMZg5bxhJAGTU50Athk4",
-            authDomain: "pos-sport.firebaseapp.com",
-            projectId: "pos-sport",
-            storageBucket: "pos-sport.firebasestorage.app",
-            messagingSenderId: "1097156311402",
-            appId: "1:1097156311402:web:46ba58865996e471b70d13",
-            measurementId: "G-NVM7ZNZZYB"
-        };
-
-        // Initialiser Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        // Rendre accessible globalement
-        window.firebaseDB = db;
-        window.firebaseModules = {
-            collection, addDoc, setDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp
-        };
-
-        console.log('✅ Firebase modular initialisé');
-    </script>
+    <!-- Firebase v9+ via CDN -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
     <style>
         /* Styles pour le mode Dark */
@@ -126,14 +104,23 @@
         const { useState, useEffect } = React;
 
         // --- INITIALISATION FIREBASE ---
-        let db = window.firebaseDB;
-        const firebaseModules = window.firebaseModules || {};
-        const { collection, addDoc, setDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp } = firebaseModules;
+        let db = null;
+        try {
+            const firebaseConfig = {
+                apiKey: "AIzaSyCJbnlwr0mawraiMZg5bxhJAGTU50Athk4",
+                authDomain: "pos-sport.firebaseapp.com",
+                projectId: "pos-sport",
+                storageBucket: "pos-sport.firebasestorage.app",
+                messagingSenderId: "1097156311402",
+                appId: "1:1097156311402:web:46ba58865996e471b70d13",
+                measurementId: "G-NVM7ZNZZYB"
+            };
 
-        if (!db) {
-            console.warn('⚠️ Firebase non disponible');
-        } else {
-            console.log('✅ Firebase en mode modular');
+            const app = firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            console.log('✅ Firebase Firestore connecté');
+        } catch (error) {
+            console.warn('⚠️ Firebase non disponible:', error.message);
         }
 
         // --- FONCTIONS DE SAUVEGARDE FIRESTORE ---
@@ -143,10 +130,9 @@
                 return;
             }
             try {
-                const colRef = collection(db, collectionName);
-                await addDoc(colRef, {
+                await db.collection(collectionName).add({
                     ...data,
-                    timestamp: serverTimestamp()
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
                 });
                 console.log(`✅ ${collectionName} sauvegardé dans Firestore`);
             } catch (error) {
@@ -157,8 +143,7 @@
         const updateFirestore = async (collectionName, docId, data) => {
             if (!db) return;
             try {
-                const docRef = doc(db, collectionName, docId);
-                await updateDoc(docRef, data);
+                await db.collection(collectionName).doc(docId).update(data);
                 console.log(`✅ ${collectionName} mis à jour`);
             } catch (error) {
                 console.error(`❌ Erreur mise à jour ${collectionName}:`, error.message);
@@ -172,8 +157,7 @@
                 return;
             }
             try {
-                const docRef = doc(db, 'settings', 'permissions');
-                await setDoc(docRef, permsData, { merge: true });
+                await db.collection('settings').doc('permissions').set(permsData, { merge: true });
                 console.log('✅ Permissions sauvegardées dans Firestore');
             } catch (error) {
                 console.error('❌ Erreur sauvegarde permissions:', error.message);
@@ -186,9 +170,8 @@
                 return null;
             }
             try {
-                const docRef = doc(db, 'settings', 'permissions');
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
+                const docSnap = await db.collection('settings').doc('permissions').get();
+                if (docSnap.exists) {
                     console.log('✅ Permissions chargées depuis Firestore');
                     return docSnap.data();
                 }
@@ -203,8 +186,7 @@
         const saveUsersToFirebase = async (usersData) => {
             if (!db) return;
             try {
-                const docRef = doc(db, 'settings', 'users');
-                await setDoc(docRef, { users: usersData }, { merge: true });
+                await db.collection('settings').doc('users').set({ users: usersData }, { merge: true });
                 console.log('✅ Utilisateurs sauvegardés dans Firestore');
             } catch (error) {
                 console.error('❌ Erreur sauvegarde utilisateurs:', error.message);
@@ -214,9 +196,8 @@
         const loadUsersFromFirebase = async () => {
             if (!db) return null;
             try {
-                const docRef = doc(db, 'settings', 'users');
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists() && docSnap.data().users) {
+                const docSnap = await db.collection('settings').doc('users').get();
+                if (docSnap.exists && docSnap.data().users) {
                     console.log('✅ Utilisateurs chargés depuis Firestore');
                     return docSnap.data().users;
                 }
@@ -925,12 +906,79 @@
                 return saved ? JSON.parse(saved) : {};
             });
 
+            // Produits dynamiques (peuvent être importés depuis Excel)
+            const [products, setProducts] = useState(() => {
+                const saved = localStorage.getItem('posProducts');
+                return saved ? JSON.parse(saved) : MOCK_PRODUCTS;
+            });
+
+            // Sauvegarder les produits dans localStorage
+            useEffect(() => {
+                localStorage.setItem('posProducts', JSON.stringify(products));
+            }, [products]);
+
+            // Fonction pour importer des articles depuis Excel
+            const handleExcelImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const data = new Uint8Array(evt.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                        // Convertir les données Excel en format produit
+                        const newProducts = jsonData.map((row, index) => {
+                            const id = row.id || row.ID || (Math.max(...products.map(p => p.id), 0) + index + 1);
+                            const name = row.nom || row.name || row.Nom || row.Name || 'Produit sans nom';
+                            const price = parseFloat(row.prix || row.price || row.Prix || row.Price || 0);
+                            const category = row.categorie || row.category || row.Catégorie || row.Category || 'Vente';
+                            const barcode = row.barcode || row.code || row.Barcode || row.Code || `370${Date.now()}${index}`;
+                            const isRentable = (row.location || row.rentable || row.Location || row.Rentable || '').toString().toLowerCase() === 'oui' || 
+                                               (row.location || row.rentable || row.Location || row.Rentable || '').toString().toLowerCase() === 'true';
+
+                            return {
+                                id,
+                                name,
+                                price,
+                                isRentable,
+                                category,
+                                color: category === 'Location' ? 'bg-green-600/30' : category === 'Services' ? 'bg-yellow-600/30' : 'bg-indigo-600/30',
+                                text: category === 'Location' ? 'text-green-300' : category === 'Services' ? 'text-yellow-300' : 'text-indigo-300',
+                                barcode
+                            };
+                        });
+
+                        // Fusionner avec les produits existants (éviter les doublons par ID)
+                        const existingIds = new Set(products.map(p => p.id));
+                        const uniqueNewProducts = newProducts.filter(p => !existingIds.has(p.id));
+                        
+                        setProducts([...products, ...uniqueNewProducts]);
+                        
+                        // Sauvegarder chaque nouveau produit dans Firebase
+                        uniqueNewProducts.forEach(product => {
+                            saveToFirestore('products', product);
+                        });
+                        
+                        alert(`✅ ${uniqueNewProducts.length} article(s) importé(s) avec succès et sauvegardés dans Firebase !`);
+                    } catch (error) {
+                        console.error('Erreur import Excel:', error);
+                        alert('❌ Erreur lors de l\'import du fichier Excel');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
             // Fonction pour enregistrer un mouvement de stock
             const recordStockMovement = (productId, quantity, type, reason = '') => {
                 const movement = {
                     id: `MOV${Date.now()}`,
                     productId,
-                    productName: MOCK_PRODUCTS.find(p => p.id === productId)?.name || 'Unknown',
+                    productName: products.find(p => p.id === productId)?.name || 'Unknown',
                     quantity,
                     type, // 'entrée' ou 'sortie'
                     reason,
@@ -1116,7 +1164,7 @@
                 }
 
                 // Rechercher le produit par code-barre
-                const scannedProduct = MOCK_PRODUCTS.find(p => p.barcode === barcodeInput);
+                const scannedProduct = products.find(p => p.barcode === barcodeInput);
                 
                 if (scannedProduct) {
                     // Ajouter le produit au panier
@@ -1151,7 +1199,7 @@
                 };
                 
                 // Ajouter au catalogue
-                MOCK_PRODUCTS.push(newProduct);
+                setProducts([...products, newProduct]);
                 // 🔥 Sauvegarder dans Firebase
                 saveToFirestore('products', newProduct);
                 
@@ -1188,7 +1236,7 @@
                 };
                 
                 // Ajouter au catalogue
-                MOCK_PRODUCTS.push(newProduct);
+                setProducts([...products, newProduct]);
                 // 🔥 Sauvegarder dans Firebase
                 saveToFirestore('products', newProduct);
                 
@@ -1443,7 +1491,7 @@
             const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
             const formatPrice = (price) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(price);
 
-            const filteredProducts = MOCK_PRODUCTS.filter(p => 
+            const filteredProducts = products.filter(p => 
                 p.category === serviceTab && p.name.toLowerCase().includes(searchQuery.toLowerCase())
             );
 
@@ -1626,7 +1674,7 @@
                         <details className="p-3 bg-gray-800 border-t border-gray-700 text-xs">
                             <summary className="cursor-pointer font-semibold text-gray-300 hover:text-white">📋 Codes-barres disponibles</summary>
                             <div className="mt-2 space-y-1 text-gray-400 text-xs">
-                                {MOCK_PRODUCTS.map(product => (
+                                {products.map(product => (
                                     <div key={product.id} className="p-1 bg-gray-900 rounded border border-gray-700">
                                         <div className="font-mono text-blue-300">{product.barcode}</div>
                                         <div className="truncate">{product.name}</div>
@@ -2289,13 +2337,33 @@
                                         <div className="space-y-6">
                                             <div className="flex justify-between items-center">
                                                 <h2 className="text-2xl font-bold text-white">🏷️ Gestion des Articles & Fournisseurs</h2>
+                                                <div className="flex gap-2">
+                                                    <label className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold cursor-pointer transition flex items-center gap-2">
+                                                        📥 Importer Excel
+                                                        <input 
+                                                            type="file" 
+                                                            accept=".xlsx,.xls" 
+                                                            onChange={handleExcelImport}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                    <button 
+                                                        onClick={() => {
+                                                            const example = "Exemple de format Excel:\nnom | prix | categorie | barcode | location\nSki Expert | 35.00 | Location | 370123456 | oui\nGants Ski | 49.99 | Vente | 370123457 | non";
+                                                            alert(example);
+                                                        }}
+                                                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold transition"
+                                                    >
+                                                        ℹ️ Format
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             {/* Affichage de tous les articles */}
                                             <div className="space-y-4">
-                                                <h3 className="text-xl font-bold text-white">📦 Catalogue Complet</h3>
+                                                <h3 className="text-xl font-bold text-white">📦 Catalogue Complet ({products.length} articles)</h3>
                                                 <div className="grid grid-cols-1 gap-4">
-                                                    {MOCK_PRODUCTS.map(product => {
+                                                    {products.map(product => {
                                                         const supplier = productSuppliers[product.id];
                                                         const cost = productCosts[product.id] || 0;
                                                         const margin = product.price > 0 && cost > 0 
