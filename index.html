@@ -782,17 +782,17 @@
         };
 
         const MOCK_CLIENTS = [
-            { id: 'C001', num: 'CLI-001', nom: 'Dupont', prenom: 'Jean', adresse: '123 Rue de la Paix', dateNaissance: '1990-05-15', ville: 'Chamonix', loyaltyPoints: 450 },
-            { id: 'C002', num: 'CLI-002', nom: 'Martin', prenom: 'Sophie', adresse: '456 Avenue des Pistes', dateNaissance: '1985-08-20', ville: 'Annecy', loyaltyPoints: 120 },
+            { id: 'C001', num: 'CLI-001', nom: 'Dupont', prenom: 'Jean', adresse: '123 Rue de la Paix', dateNaissance: '1990-05-15', ville: 'Chamonix', loyaltyPoints: 450, entityId: 'E001', companyId: 'C001' },
+            { id: 'C002', num: 'CLI-002', nom: 'Martin', prenom: 'Sophie', adresse: '456 Avenue des Pistes', dateNaissance: '1985-08-20', ville: 'Annecy', loyaltyPoints: 120, entityId: 'E001', companyId: 'C001' },
         ];
 
         const MOCK_PRODUCTS = [
-            { id: 101, name: 'Pack Ski Alpin - Expert', price: 35.00, isRentable: true, category: 'Location', color: 'bg-green-600/30', text: 'text-green-300', barcode: '3701234567891' },
-            { id: 102, name: 'Location VTT Adulte (Jour)', price: 25.00, isRentable: true, category: 'Location', color: 'bg-green-600/30', text: 'text-green-300', barcode: '3701234567892' },
-            { id: 201, name: 'Gants de Ski Imperméables', price: 49.99, isRentable: false, category: 'Vente', color: 'bg-indigo-600/30', text: 'text-indigo-300', barcode: '3701234567893' },
-            { id: 202, name: 'Casquette Technique', price: 19.99, isRentable: false, category: 'Vente', color: 'bg-indigo-600/30', text: 'text-indigo-300', barcode: '3701234567894' },
-            { id: 301, name: 'Forfait Saison VTT', price: 299.00, isRentable: false, category: 'Services', color: 'bg-yellow-600/30', text: 'text-yellow-300', barcode: '3701234567895' },
-            { id: 302, name: 'Réparation Ski (Atelier)', price: 45.00, isRentable: false, category: 'Services', color: 'bg-yellow-600/30', text: 'text-yellow-300', barcode: '3701234567896' },
+            { id: 101, name: 'Pack Ski Alpin - Expert', price: 35.00, isRentable: true, category: 'Location', color: 'bg-green-600/30', text: 'text-green-300', barcode: '3701234567891', entityId: 'E001', companyId: 'C001' },
+            { id: 102, name: 'Location VTT Adulte (Jour)', price: 25.00, isRentable: true, category: 'Location', color: 'bg-green-600/30', text: 'text-green-300', barcode: '3701234567892', entityId: 'E001', companyId: 'C001' },
+            { id: 201, name: 'Gants de Ski Imperméables', price: 49.99, isRentable: false, category: 'Vente', color: 'bg-indigo-600/30', text: 'text-indigo-300', barcode: '3701234567893', entityId: 'E001', companyId: 'C001' },
+            { id: 202, name: 'Casquette Technique', price: 19.99, isRentable: false, category: 'Vente', color: 'bg-indigo-600/30', text: 'text-indigo-300', barcode: '3701234567894', entityId: 'E001', companyId: 'C001' },
+            { id: 301, name: 'Forfait Saison VTT', price: 299.00, isRentable: false, category: 'Services', color: 'bg-yellow-600/30', text: 'text-yellow-300', barcode: '3701234567895', entityId: 'E001', companyId: 'C001' },
+            { id: 302, name: 'Réparation Ski (Atelier)', price: 45.00, isRentable: false, category: 'Services', color: 'bg-yellow-600/30', text: 'text-yellow-300', barcode: '3701234567896', entityId: 'E001', companyId: 'C001' },
         ];
 
         // Structure d'un article dans le panier (avec détails de location)
@@ -975,6 +975,10 @@
             const accessibleStores = currentUser ? 
                 (currentUser.role === 'admin' ? stores : stores.filter(s => s.entityId === currentUser.entityId)) : [];
 
+            // Les clients accessibles : filtrés selon l'entité de l'utilisateur (superadmin voir tous)
+            const accessibleClients = currentUser ? 
+                (currentUser.role === 'superadmin' ? clients : clients.filter(c => c.entityId === currentUser.entityId)) : [];
+
             // Sauvegarder les entités dans localStorage
             useEffect(() => {
                 localStorage.setItem('posEntities', JSON.stringify(entities));
@@ -1097,7 +1101,9 @@
                                 category,
                                 color: category === 'Location' ? 'bg-green-600/30' : category === 'Services' ? 'bg-yellow-600/30' : 'bg-indigo-600/30',
                                 text: category === 'Location' ? 'text-green-300' : category === 'Services' ? 'text-yellow-300' : 'text-indigo-300',
-                                barcode
+                                barcode,
+                                entityId: currentUser.entityId,
+                                companyId: currentUser.companyId
                             };
                         });
 
@@ -1517,10 +1523,16 @@
             };
 
             const handleAddClient = (newClient) => {
-                setClients(prev => [...prev, newClient]);
-                setSelectedClient(newClient);
+                // Ajouter les informations d'entité et de compagnie
+                const clientWithContext = {
+                    ...newClient,
+                    entityId: currentUser.entityId,
+                    companyId: currentUser.companyId
+                };
+                setClients(prev => [...prev, clientWithContext]);
+                setSelectedClient(clientWithContext);
                 // 🔥 Sauvegarder dans Firebase
-                saveToFirestore('clients', newClient);
+                saveToFirestore('clients', clientWithContext);
             };
 
             const handleSelectClient = (client) => {
@@ -1605,7 +1617,9 @@
                     category: 'Vente',
                     color: 'bg-indigo-600/30',
                     text: 'text-indigo-300',
-                    barcode: newBarcode
+                    barcode: newBarcode,
+                    entityId: currentUser.entityId,
+                    companyId: currentUser.companyId
                 };
                 
                 // Ajouter au catalogue
@@ -1642,7 +1656,9 @@
                     category: 'Location',
                     color: 'bg-green-600/30',
                     text: 'text-green-300',
-                    barcode: newBarcode
+                    barcode: newBarcode,
+                    entityId: currentUser.entityId,
+                    companyId: currentUser.companyId
                 };
                 
                 // Ajouter au catalogue
@@ -1705,6 +1721,7 @@
                     paymentMethod: paymentLabel,
                     notes: '',
                     // Informations entité, magasin et utilisateur
+                    companyId: currentUser?.companyId || 'UNKNOWN',
                     entityId: currentUser?.entityId || 'UNKNOWN',
                     entityName: currentEntity?.name || 'Entité inconnue',
                     storeId: currentUser?.storeId || 'UNKNOWN',
@@ -1914,9 +1931,18 @@
             const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
             const formatPrice = (price) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(price);
 
-            const filteredProducts = products.filter(p => 
-                p.category === serviceTab && p.name.toLowerCase().includes(searchQuery.toLowerCase())
-            );
+            const filteredProducts = products.filter(p => {
+                // Filtrer par catégorie et recherche
+                const matchesSearch = p.category === serviceTab && p.name.toLowerCase().includes(searchQuery.toLowerCase());
+                
+                // Filtrer par entité de l'utilisateur (superadmin voir tous)
+                if (currentUser?.role === 'superadmin') {
+                    return matchesSearch;
+                }
+                
+                // Les utilisateurs normaux ne voient que les produits de leur entité
+                return matchesSearch && p.entityId === currentUser?.entityId;
+            });
 
             const tabs = ['Vente', 'Location', 'Services'];
 
@@ -2502,7 +2528,7 @@
                     <ClientManagementModal 
                         isOpen={isClientModalOpen}
                         onClose={() => setIsClientModalOpen(false)}
-                        clients={clients}
+                        clients={accessibleClients}
                         onAddClient={handleAddClient}
                         onSelectClient={handleSelectClient}
                         generateClientNumber={generateClientNumber}
@@ -3613,7 +3639,7 @@
                                             <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
                                                 <h3 className="text-xl font-bold text-white mb-4">📋 Détail des clients</h3>
                                                 <div className="space-y-3">
-                                                    {clients.map(client => {
+                                                    {accessibleClients.map(client => {
                                                         const segment = getClientSegment(client.num);
                                                         const loyaltyPoints = calculateLoyaltyPoints(client.num);
                                                         const purchaseHistory = getClientPurchaseHistory(client.num);
@@ -4002,7 +4028,7 @@
                                                             <div className="bg-yellow-900/30 p-4 rounded-lg border border-yellow-600">
                                                                 <div className="text-xs text-yellow-300">CA Total</div>
                                                                 <div className="text-2xl font-bold text-yellow-400">
-                                                                    {formatPrice(transactions.filter(t => entities.find(e => e.companyId === company.id && e.id === t.entityId?.split('_')[0])).reduce((sum, t) => sum + t.total, 0) || 0)}
+                                                                    {formatPrice(transactions.filter(t => t.companyId === company.id).reduce((sum, t) => sum + t.total, 0) || 0)}
                                                                 </div>
                                                             </div>
                                                         </div>
