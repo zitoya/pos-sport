@@ -973,6 +973,99 @@
                 reader.readAsArrayBuffer(file);
             };
 
+            // Fonction pour importer des fournisseurs depuis Excel
+            const handleSuppliersImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const data = new Uint8Array(evt.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                        // Convertir les données Excel en format fournisseur
+                        const newSuppliers = jsonData.map((row, index) => {
+                            const id = row.id || row.ID || `SUP${String(suppliers.length + index + 1).padStart(3, '0')}`;
+                            const name = row.nom || row.name || row.Nom || row.Name || 'Fournisseur sans nom';
+                            const email = row.email || row.Email || '';
+                            const phone = row.telephone || row.phone || row.Téléphone || row.Phone || '';
+                            const country = row.pays || row.country || row.Pays || row.Country || 'France';
+
+                            return { id, name, email, phone, country };
+                        });
+
+                        // Éviter les doublons par ID
+                        const existingIds = new Set(suppliers.map(s => s.id));
+                        const uniqueNewSuppliers = newSuppliers.filter(s => !existingIds.has(s.id));
+                        
+                        setSuppliers([...suppliers, ...uniqueNewSuppliers]);
+                        
+                        // Sauvegarder chaque nouveau fournisseur dans Firebase
+                        uniqueNewSuppliers.forEach(supplier => {
+                            saveToFirestore('suppliers', supplier);
+                        });
+                        
+                        alert(`✅ ${uniqueNewSuppliers.length} fournisseur(s) importé(s) avec succès et sauvegardé(s) dans Firebase !`);
+                    } catch (error) {
+                        console.error('Erreur import fournisseurs:', error);
+                        alert('❌ Erreur lors de l\'import du fichier Excel');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
+            // Fonction pour importer des clients depuis Excel
+            const handleClientsImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const data = new Uint8Array(evt.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                        // Convertir les données Excel en format client
+                        const newClients = jsonData.map((row, index) => {
+                            const id = row.id || row.ID || `C${String(clients.length + index + 1).padStart(3, '0')}`;
+                            const num = row.num || row.Num || `CLI-${String(clients.length + index + 1).padStart(3, '0')}`;
+                            const nom = row.nom || row.name || row.Nom || row.Name || 'Client';
+                            const prenom = row.prenom || row.firstname || row.Prénom || row.FirstName || '';
+                            const adresse = row.adresse || row.address || row.Adresse || row.Address || '';
+                            const dateNaissance = row.dateNaissance || row.birthDate || row.Date || '';
+                            const ville = row.ville || row.city || row.Ville || row.City || '';
+                            const loyaltyPoints = parseInt(row.loyaltyPoints || row.points || row.Points || 0);
+
+                            return { id, num, nom, prenom, adresse, dateNaissance, ville, loyaltyPoints };
+                        });
+
+                        // Éviter les doublons par ID
+                        const existingIds = new Set(clients.map(c => c.id));
+                        const uniqueNewClients = newClients.filter(c => !existingIds.has(c.id));
+                        
+                        setClients([...clients, ...uniqueNewClients]);
+                        
+                        // Sauvegarder chaque nouveau client dans Firebase
+                        uniqueNewClients.forEach(client => {
+                            saveToFirestore('clients', client);
+                        });
+                        
+                        alert(`✅ ${uniqueNewClients.length} client(s) importé(s) avec succès et sauvegardé(s) dans Firebase !`);
+                    } catch (error) {
+                        console.error('Erreur import clients:', error);
+                        alert('❌ Erreur lors de l\'import du fichier Excel');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
             // Fonction pour enregistrer un mouvement de stock
             const recordStockMovement = (productId, quantity, type, reason = '') => {
                 const movement = {
@@ -2278,26 +2371,37 @@
                                     {backOfficeTab === 'suppliers' && (
                                         <div className="space-y-4">
                                             <div className="flex justify-between items-center mb-4">
-                                                <h3 className="text-lg font-bold text-white">Gestion des Fournisseurs</h3>
-                                                <button 
-                                                    onClick={() => {
-                                                        const newSupplier = {
-                                                            id: `SUP${String(suppliers.length + 1).padStart(3, '0')}`,
-                                                            name: prompt('Nom du fournisseur:') || 'Nouveau Fournisseur',
-                                                            email: prompt('Email:') || '',
-                                                            phone: prompt('Téléphone:') || '',
-                                                            country: prompt('Pays:') || 'France'
-                                                        };
-                                                        const updated = [...suppliers, newSupplier];
-                                                        setSuppliers(updated);
-                                                        localStorage.setItem('posSuppliers', JSON.stringify(updated));
-                                                        // 🔥 Sauvegarder dans Firebase
-                                                        saveToFirestore('suppliers', newSupplier);
-                                                    }}
-                                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded transition"
-                                                >
-                                                    + Ajouter Fournisseur
-                                                </button>
+                                                <h3 className="text-lg font-bold text-white">🏭 Gestion des Fournisseurs</h3>
+                                                <div className="flex gap-2">
+                                                    <label className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded transition cursor-pointer flex items-center gap-2">
+                                                        📥 Importer Excel
+                                                        <input 
+                                                            type="file" 
+                                                            accept=".xlsx,.xls,.csv" 
+                                                            onChange={handleSuppliersImport}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                    <button 
+                                                        onClick={() => {
+                                                            const newSupplier = {
+                                                                id: `SUP${String(suppliers.length + 1).padStart(3, '0')}`,
+                                                                name: prompt('Nom du fournisseur:') || 'Nouveau Fournisseur',
+                                                                email: prompt('Email:') || '',
+                                                                phone: prompt('Téléphone:') || '',
+                                                                country: prompt('Pays:') || 'France'
+                                                            };
+                                                            const updated = [...suppliers, newSupplier];
+                                                            setSuppliers(updated);
+                                                            localStorage.setItem('posSuppliers', JSON.stringify(updated));
+                                                            // 🔥 Sauvegarder dans Firebase
+                                                            saveToFirestore('suppliers', newSupplier);
+                                                        }}
+                                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded transition"
+                                                    >
+                                                        + Ajouter Manuel
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             <div className="grid grid-cols-1 gap-3">
@@ -2904,7 +3008,18 @@
                                     {/* --- ONGLET CRM CLIENTS --- */}
                                     {backOfficeTab === 'clients' && (
                                         <div className="space-y-6">
-                                            <h2 className="text-2xl font-bold text-white">👥 Gestion CRM Clients</h2>
+                                            <div className="flex justify-between items-center">
+                                                <h2 className="text-2xl font-bold text-white">👥 Gestion CRM Clients</h2>
+                                                <label className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded transition cursor-pointer flex items-center gap-2">
+                                                    📥 Importer Excel
+                                                    <input 
+                                                        type="file" 
+                                                        accept=".xlsx,.xls,.csv" 
+                                                        onChange={handleClientsImport}
+                                                        className="hidden"
+                                                    />
+                                                </label>
+                                            </div>
 
                                             {/* Vue d'ensemble clients par segment */}
                                             <div className="grid grid-cols-5 gap-4">
