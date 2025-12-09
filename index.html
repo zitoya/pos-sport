@@ -15,6 +15,12 @@
     <!-- SheetJS pour lire les fichiers Excel -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
+    <!-- JsBarcode pour générer les codes-barres -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+
+    <!-- html2pdf pour exporter en PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
     <!-- Firebase v9+ via CDN -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -884,6 +890,11 @@
                 }
             }, []);
 
+            // Sauvegarder automatiquement l'historique d'étiquettes
+            useEffect(() => {
+                localStorage.setItem('posLabelHistory', JSON.stringify(labelHistory));
+            }, [labelHistory]);
+
             // Fonctions d'authentification
             const handleLogin = (e) => {
                 e.preventDefault();
@@ -938,6 +949,22 @@
             // État pour afficher/masquer la gestion des utilisateurs d'une société
             const [expandedCompanyId, setExpandedCompanyId] = useState(null);
             const [companyManagementTab, setCompanyManagementTab] = useState('users');
+            
+            // États pour l'impression d'étiquettes
+            const [selectedProductsForLabels, setSelectedProductsForLabels] = useState([]);
+            const [labelQuantities, setLabelQuantities] = useState({}); // Quantités par produit {productId: number}
+            const [labelFormat, setLabelFormat] = useState('100x150'); // Format d'étiquette
+            const [customLabelWidth, setCustomLabelWidth] = useState(100);
+            const [customLabelHeight, setCustomLabelHeight] = useState(150);
+            const [showCustomFormat, setShowCustomFormat] = useState(false);
+            const [labelShowPrice, setLabelShowPrice] = useState(true);
+            const [labelShowBarcode, setLabelShowBarcode] = useState(true);
+            const [labelShowProductId, setLabelShowProductId] = useState(true);
+            const [labelShowCategory, setLabelShowCategory] = useState(false);
+            const [labelHistory, setLabelHistory] = useState(() => {
+                const saved = localStorage.getItem('posLabelHistory');
+                return saved ? JSON.parse(saved) : [];
+            });
 
             // Obtenir l'entité et le magasin actuel
             // D'abord, utiliser le magasin sélectionné, sinon le magasin de l'utilisateur
@@ -1269,6 +1296,172 @@
                     totalTransactions,
                     periodExpenses
                 };
+            };
+
+            // Fonction pour dupliquer les produits selon les quantités d'étiquettes
+            const expandProductsByQuantity = (products, quantities) => {
+                return products.flatMap(product => {
+                    const qty = quantities[product.id] || 1;
+                    return Array.from({ length: qty }, () => product);
+                });
+            };
+
+            // Fonction pour générer l'HTML d'une étiquette
+            const generateLabelHTML = (product, format, options = {}) => {
+                const dimensions = {
+                    '50x25': { width: '50mm', height: '25mm', fontSize: '8px' },
+                    '100x150': { width: '100mm', height: '150mm', fontSize: '14px' },
+                    '4x6': { width: '101.6mm', height: '152.4mm', fontSize: '16px' },
+                    'custom': { width: `${customLabelWidth}mm`, height: `${customLabelHeight}mm`, fontSize: '12px' }
+                };
+                
+                const dim = dimensions[format] || dimensions['100x150'];
+                const fontSize = format === 'custom' ? '12px' : dim.fontSize;
+                
+                // Récupérer les options d'affichage
+                const showPrice = options.showPrice !== undefined ? options.showPrice : labelShowPrice;
+                const showBarcode = options.showBarcode !== undefined ? options.showBarcode : labelShowBarcode;
+                const showProductId = options.showProductId !== undefined ? options.showProductId : labelShowProductId;
+                const showCategory = options.showCategory !== undefined ? options.showCategory : labelShowCategory;
+                
+                return `
+                    <div style="
+                        width: ${dim.width}; 
+                        height: ${dim.height}; 
+                        padding: 6px; 
+                        border: 1px solid #ccc;
+                        margin: 5px;
+                        display: inline-block;
+                        background: white;
+                        color: black;
+                        font-family: Arial, sans-serif;
+                        page-break-inside: avoid;
+                        font-size: ${fontSize};
+                    ">
+                        <div style="font-weight: bold; font-size: 13px; margin-bottom: 3px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            ${product.name.substring(0, 20)}
+                        </div>
+                        ${showCategory ? `<div style="font-size: 9px; text-align: center; color: #666; margin-bottom: 2px;">
+                            ${product.categorie || product.category || 'N/A'}
+                        </div>` : ''}
+                        ${showBarcode ? `<div style="text-align: center; margin-bottom: 4px;">
+                            <svg id="barcode-${product.id}" style="max-width: 95%; max-height: 35px;"></svg>
+                        </div>` : ''}
+                        ${showPrice ? `<div style="text-align: center; font-weight: bold; font-size: 15px; margin-bottom: 2px;">
+                            ${product.price}€
+                        </div>` : ''}
+                        ${showProductId ? `<div style="font-size: 9px; text-align: center; color: #666;">
+                            ${product.barcode || product.id}
+                        </div>` : ''}
+                    </div>
+                `;
+            };
+
+            // Fonction pour imprimer les étiquettes en PDF
+            const printLabelsAsPDF = (productsToprint, format, options = {}) => {
+                if (productsToprint.length === 0) {
+                    alert('❌ Veuillez sélectionner des produits');
+                    return;
+                }
+
+                const element = document.createElement('div');
+                element.style.padding = '10mm';
+                element.innerHTML = productsToprint.map(p => generateLabelHTML(p, format, options)).join('');
+                
+                // Générer les codes-barres
+                productsToprint.forEach(product => {
+                    setTimeout(() => {
+                        try {
+                            if (window.JsBarcode && options.showBarcode !== false) {
+                                window.JsBarcode(`#barcode-${product.id}`, product.barcode || product.id, {
+                                    format: 'CODE128',
+                                    width: 2,
+                                    height: 40,
+                                    displayValue: false
+                                });
+                            }
+                        } catch (e) {
+                            console.log('Code-barre non généré');
+                        }
+                    }, 100);
+                });
+
+                // Créer le PDF
+                setTimeout(() => {
+                    const opt = {
+                        margin: 5,
+                        filename: `etiquettes_${new Date().toISOString().split('T')[0]}.pdf`,
+                        image: { type: 'jpeg', quality: 0.98 },
+                        html2canvas: { scale: 2 },
+                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    };
+                    
+                    if (window.html2pdf) {
+                        window.html2pdf().set(opt).from(element).save();
+                    } else {
+                        const printWindow = window.open('', '', 'height=600,width=800');
+                        printWindow.document.write(element.innerHTML);
+                        printWindow.print();
+                    }
+                }, 500);
+            };
+
+            // Fonction pour imprimer directement
+            const printLabelsDirectly = (productsToprint, format, options = {}) => {
+                if (productsToprint.length === 0) {
+                    alert('❌ Veuillez sélectionner des produits');
+                    return;
+                }
+
+                const printWindow = window.open('', '', 'height=600,width=800');
+                const html = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <style>
+                            body { margin: 0; padding: 10mm; font-family: Arial, sans-serif; }
+                            @media print { .label { page-break-inside: avoid; } }
+                        </style>
+                    </head>
+                    <body>
+                        ${productsToprint.map(p => generateLabelHTML(p, format, options)).join('')}
+                    </body>
+                    </html>
+                `;
+                
+                printWindow.document.write(html);
+                printWindow.document.close();
+                
+                // Générer les codes-barres avant impression
+                setTimeout(() => {
+                    productsToprint.forEach(product => {
+                        try {
+                            if (printWindow.JsBarcode && options.showBarcode !== false) {
+                                printWindow.JsBarcode(`#barcode-${product.id}`, product.barcode || product.id, {
+                                    format: 'CODE128',
+                                    width: 2,
+                                    height: 40,
+                                    displayValue: false
+                                });
+                            }
+                        } catch (e) {
+                            console.log('Code-barre non généré');
+                        }
+                    });
+                    
+                    // Ajouter à l'historique
+                    const printRecord = {
+                        id: Date.now(),
+                        date: new Date().toISOString(),
+                        productCount: productsToprint.length,
+                        format: format,
+                        user: currentUser?.fullName || 'Inconnu',
+                        store: currentStore?.name || 'Tous'
+                    };
+                    setLabelHistory([...labelHistory, printRecord]);
+                    
+                    printWindow.print();
+                }, 300);
             };
 
             // Fonction pour calculer les points de fidélité
@@ -2491,6 +2684,14 @@
                                                 : 'text-gray-400 hover:text-white'
                                         }`}
                                     >⚖️ Mentions Légales</button>
+                                    <button 
+                                        onClick={() => setBackOfficeTab('labels')}
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                            backOfficeTab === 'labels' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >📌 Étiquettes</button>
                                     <button 
                                         onClick={() => setBackOfficeTab('reports')}
                                         className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
@@ -4727,6 +4928,289 @@
                                                     </div>
                                                 </>
                                             )}
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET ÉTIQUETTES (Impression) --- */}
+                                    {backOfficeTab === 'labels' && (
+                                        <div className="space-y-6">
+                                            <div>
+                                                <h2 className="text-3xl font-bold text-white mb-6">📌 Impression d'Étiquettes</h2>
+                                                
+                                                {/* Sélection de produits */}
+                                                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+                                                    <h3 className="text-xl font-bold text-white mb-4">📦 Sélectionner les articles</h3>
+                                                    
+                                                    <div className="mb-4 flex gap-2">
+                                                        <button 
+                                                            onClick={() => setSelectedProductsForLabels(products)}
+                                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded transition"
+                                                        >
+                                                            ✓ Tous les articles ({products.length})
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => setSelectedProductsForLabels([])}
+                                                            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded transition"
+                                                        >
+                                                            ✗ Désélectionner tous
+                                                        </button>
+                                                        <div className="ml-auto text-white">
+                                                            Sélectionnés: <span className="font-bold text-yellow-400">{selectedProductsForLabels.length}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-2 max-h-64 overflow-y-auto bg-gray-900 p-4 rounded-lg">
+                                                        {products.map(product => (
+                                                            <div key={product.id} className="flex items-center gap-3 p-2 bg-gray-800 rounded hover:bg-gray-700 transition">
+                                                                <input 
+                                                                    type="checkbox"
+                                                                    checked={selectedProductsForLabels.some(p => p.id === product.id)}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            setSelectedProductsForLabels([...selectedProductsForLabels, product]);
+                                                                            // Initialiser la quantité à 1 si non définie
+                                                                            if (!labelQuantities[product.id]) {
+                                                                                setLabelQuantities({...labelQuantities, [product.id]: 1});
+                                                                            }
+                                                                        } else {
+                                                                            setSelectedProductsForLabels(selectedProductsForLabels.filter(p => p.id !== product.id));
+                                                                        }
+                                                                    }}
+                                                                    className="w-5 h-5 cursor-pointer"
+                                                                />
+                                                                <span className="flex-1 text-white">{product.name}</span>
+                                                                <span className="text-yellow-400 font-bold">{product.price}€</span>
+                                                                <span className="text-gray-500 text-xs">{product.barcode || 'N/A'}</span>
+                                                                {selectedProductsForLabels.some(p => p.id === product.id) && (
+                                                                    <div className="flex items-center gap-2 bg-gray-700 px-2 py-1 rounded">
+                                                                        <label className="text-gray-300 text-xs">Qté :</label>
+                                                                        <input 
+                                                                            type="number"
+                                                                            value={labelQuantities[product.id] || 1}
+                                                                            onChange={(e) => {
+                                                                                const qty = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                setLabelQuantities({...labelQuantities, [product.id]: qty});
+                                                                            }}
+                                                                            min="1"
+                                                                            max="999"
+                                                                            className="w-12 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm text-center focus:outline-none"
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* Options d'impression */}
+                                                <div className="grid grid-cols-2 gap-6 mb-6">
+                                                    <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                        <h3 className="text-lg font-bold text-white mb-4">⚙️ Options d'impression</h3>
+                                                        
+                                                        <div className="space-y-4">
+                                                            <div>
+                                                                <label className="text-gray-300 font-semibold mb-2 block">Format d'étiquette</label>
+                                                                <select 
+                                                                    value={labelFormat}
+                                                                    onChange={(e) => {
+                                                                        setLabelFormat(e.target.value);
+                                                                        if (e.target.value === 'custom') {
+                                                                            setShowCustomFormat(true);
+                                                                        }
+                                                                    }}
+                                                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+                                                                >
+                                                                    <option value="50x25">50x25mm (Petit)</option>
+                                                                    <option value="100x150">100x150mm (Standard)</option>
+                                                                    <option value="4x6">4x6" (Grand)</option>
+                                                                    <option value="custom">🎨 Personnalisé</option>
+                                                                </select>
+                                                            </div>
+
+                                                            {labelFormat === 'custom' && (
+                                                                <div className="bg-purple-900/30 p-4 rounded border border-purple-600 space-y-3">
+                                                                    <div>
+                                                                        <label className="text-gray-300 font-semibold text-sm mb-2 block">Largeur (mm)</label>
+                                                                        <input 
+                                                                            type="number"
+                                                                            value={customLabelWidth}
+                                                                            onChange={(e) => setCustomLabelWidth(Math.max(10, parseInt(e.target.value) || 100))}
+                                                                            min="10"
+                                                                            max="300"
+                                                                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-purple-500"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="text-gray-300 font-semibold text-sm mb-2 block">Hauteur (mm)</label>
+                                                                        <input 
+                                                                            type="number"
+                                                                            value={customLabelHeight}
+                                                                            onChange={(e) => setCustomLabelHeight(Math.max(10, parseInt(e.target.value) || 150))}
+                                                                            min="10"
+                                                                            max="300"
+                                                                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-purple-500"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="text-xs text-purple-300 bg-purple-900/50 p-2 rounded">
+                                                                        Format actuel: {customLabelWidth}mm × {customLabelHeight}mm
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            <div className="border-t border-gray-700 pt-4">
+                                                                <label className="text-gray-300 font-semibold mb-3 block">📋 Contenu de l'étiquette</label>
+                                                                <div className="space-y-2">
+                                                                    <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-700/50 p-2 rounded transition">
+                                                                        <input 
+                                                                            type="checkbox"
+                                                                            checked={labelShowPrice}
+                                                                            onChange={(e) => setLabelShowPrice(e.target.checked)}
+                                                                            className="w-4 h-4 cursor-pointer"
+                                                                        />
+                                                                        <span className="text-sm text-gray-300">💰 Prix</span>
+                                                                    </label>
+                                                                    <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-700/50 p-2 rounded transition">
+                                                                        <input 
+                                                                            type="checkbox"
+                                                                            checked={labelShowBarcode}
+                                                                            onChange={(e) => setLabelShowBarcode(e.target.checked)}
+                                                                            className="w-4 h-4 cursor-pointer"
+                                                                        />
+                                                                        <span className="text-sm text-gray-300">📦 Code-barre</span>
+                                                                    </label>
+                                                                    <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-700/50 p-2 rounded transition">
+                                                                        <input 
+                                                                            type="checkbox"
+                                                                            checked={labelShowProductId}
+                                                                            onChange={(e) => setLabelShowProductId(e.target.checked)}
+                                                                            className="w-4 h-4 cursor-pointer"
+                                                                        />
+                                                                        <span className="text-sm text-gray-300">🆔 Référence</span>
+                                                                    </label>
+                                                                    <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-700/50 p-2 rounded transition">
+                                                                        <input 
+                                                                            type="checkbox"
+                                                                            checked={labelShowCategory}
+                                                                            onChange={(e) => setLabelShowCategory(e.target.checked)}
+                                                                            className="w-4 h-4 cursor-pointer"
+                                                                        />
+                                                                        <span className="text-sm text-gray-300">🏷️ Catégorie</span>
+                                                                    </label>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="bg-blue-900/30 p-3 rounded border border-blue-600">
+                                                                <div className="text-sm text-blue-300">
+                                                                    📊 Articles : <strong>{selectedProductsForLabels.length}</strong> | Étiquettes : <strong>{selectedProductsForLabels.reduce((sum, p) => sum + (labelQuantities[p.id] || 1), 0)}</strong>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                        <h3 className="text-lg font-bold text-white mb-4">📥 Actions</h3>
+                                                        
+                                                        <div className="space-y-3">
+                                                            <button 
+                                                                onClick={() => printLabelsDirectly(expandProductsByQuantity(selectedProductsForLabels, labelQuantities), labelFormat, {
+                                                                    showPrice: labelShowPrice,
+                                                                    showBarcode: labelShowBarcode,
+                                                                    showProductId: labelShowProductId,
+                                                                    showCategory: labelShowCategory
+                                                                })}
+                                                                className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition flex items-center justify-center gap-2"
+                                                            >
+                                                                🖨️ Imprimer directement
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => printLabelsAsPDF(expandProductsByQuantity(selectedProductsForLabels, labelQuantities), labelFormat, {
+                                                                    showPrice: labelShowPrice,
+                                                                    showBarcode: labelShowBarcode,
+                                                                    showProductId: labelShowProductId,
+                                                                    showCategory: labelShowCategory
+                                                                })}
+                                                                className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition flex items-center justify-center gap-2"
+                                                            >
+                                                                📄 Télécharger PDF
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => {
+                                                                    const options = {
+                                                                        showPrice: labelShowPrice,
+                                                                        showBarcode: labelShowBarcode,
+                                                                        showProductId: labelShowProductId,
+                                                                        showCategory: labelShowCategory
+                                                                    };
+                                                                    const expandedProducts = expandProductsByQuantity(selectedProductsForLabels, labelQuantities);
+                                                                    const element = document.createElement('div');
+                                                                    element.style.padding = '20px';
+                                                                    element.style.backgroundColor = 'white';
+                                                                    element.innerHTML = expandedProducts.map(p => generateLabelHTML(p, labelFormat, options)).join('');
+                                                                    
+                                                                    expandedProducts.forEach(product => {
+                                                                        setTimeout(() => {
+                                                                            if (window.JsBarcode && labelShowBarcode) {
+                                                                                window.JsBarcode(`#barcode-${product.id}`, product.barcode || product.id, {
+                                                                                    format: 'CODE128',
+                                                                                    width: 2,
+                                                                                    height: 40,
+                                                                                    displayValue: false
+                                                                                });
+                                                                            }
+                                                                        }, 50);
+                                                                    });
+                                                                    
+                                                                    setTimeout(() => {
+                                                                        const printWindow = window.open('', '', 'height=600,width=800');
+                                                                        printWindow.document.write(element.innerHTML);
+                                                                        printWindow.print();
+                                                                    }, 300);
+                                                                }}
+                                                                className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded transition"
+                                                            >
+                                                                👁️ Aperçu
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Historique d'impression */}
+                                                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                                                    <h3 className="text-lg font-bold text-white mb-4">📋 Historique d'impression</h3>
+                                                    
+                                                    {labelHistory.length === 0 ? (
+                                                        <div className="text-center text-gray-400 py-8">
+                                                            Aucune impression enregistrée
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                            {[...labelHistory].reverse().map(record => (
+                                                                <div key={record.id} className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                                                                    <div>
+                                                                        <div className="text-white font-semibold">
+                                                                            {record.productCount} étiquette(s) - Format {record.format}
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-400">
+                                                                            👤 {record.user} | 🏪 {record.store}
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-500">
+                                                                            📅 {new Date(record.date).toLocaleString('fr-FR')}
+                                                                        </div>
+                                                                    </div>
+                                                                    <button 
+                                                                        onClick={() => {
+                                                                            setLabelHistory(labelHistory.filter(r => r.id !== record.id));
+                                                                        }}
+                                                                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition"
+                                                                    >
+                                                                        ✕
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
 
