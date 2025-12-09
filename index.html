@@ -12,9 +12,34 @@
     
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"></script>
+    <!-- Firebase v9+ (Modular) -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+        import { getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+        // Configuration Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyCJbnlwr0mawraiMZg5bxhJAGTU50Athk4",
+            authDomain: "pos-sport.firebaseapp.com",
+            projectId: "pos-sport",
+            storageBucket: "pos-sport.firebasestorage.app",
+            messagingSenderId: "1097156311402",
+            appId: "1:1097156311402:web:46ba58865996e471b70d13",
+            measurementId: "G-NVM7ZNZZYB"
+        };
+
+        // Initialiser Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Rendre accessible globalement
+        window.firebaseDB = db;
+        window.firebaseModules = {
+            collection, addDoc, setDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp
+        };
+
+        console.log('✅ Firebase modular initialisé');
+    </script>
 
     <style>
         /* Styles pour le mode Dark */
@@ -101,49 +126,42 @@
         const { useState, useEffect } = React;
 
         // --- INITIALISATION FIREBASE ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyCJbnlwr0mawraiMZg5bxhJAGTU50Athk4",
-            authDomain: "pos-sport.firebaseapp.com",
-            projectId: "pos-sport",
-            storageBucket: "pos-sport.firebasestorage.app",
-            messagingSenderId: "1097156311402",
-            appId: "1:1097156311402:web:46ba58865996e471b70d13",
-            measurementId: "G-NVM7ZNZZYB"
-        };
+        let db = window.firebaseDB;
+        const firebaseModules = window.firebaseModules || {};
+        const { collection, addDoc, setDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp } = firebaseModules;
 
-        let db = null;
-        try {
-            const app = firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore(app);
-            console.log('✅ Firebase initialisé avec succès');
-        } catch (error) {
-            console.warn('⚠️ Firebase non disponible (mode hors ligne):', error.message);
+        if (!db) {
+            console.warn('⚠️ Firebase non disponible');
+        } else {
+            console.log('✅ Firebase en mode modular');
         }
 
         // --- FONCTIONS DE SAUVEGARDE FIRESTORE ---
-        const saveToFirestore = async (collection, data) => {
+        const saveToFirestore = async (collectionName, data) => {
             if (!db) {
                 console.warn('Firebase non disponible, données sauvegardées localement');
                 return;
             }
             try {
-                await db.collection(collection).add({
+                const colRef = collection(db, collectionName);
+                await addDoc(colRef, {
                     ...data,
-                    timestamp: new Date()
+                    timestamp: serverTimestamp()
                 });
-                console.log(`✅ ${collection} sauvegardé dans Firestore`);
+                console.log(`✅ ${collectionName} sauvegardé dans Firestore`);
             } catch (error) {
-                console.error(`❌ Erreur Firestore ${collection}:`, error);
+                console.error(`❌ Erreur Firestore ${collectionName}:`, error.message);
             }
         };
 
-        const updateFirestore = async (collection, docId, data) => {
+        const updateFirestore = async (collectionName, docId, data) => {
             if (!db) return;
             try {
-                await db.collection(collection).doc(docId).update(data);
-                console.log(`✅ ${collection} mis à jour`);
+                const docRef = doc(db, collectionName, docId);
+                await updateDoc(docRef, data);
+                console.log(`✅ ${collectionName} mis à jour`);
             } catch (error) {
-                console.error(`❌ Erreur mise à jour ${collection}:`, error);
+                console.error(`❌ Erreur mise à jour ${collectionName}:`, error.message);
             }
         };
 
@@ -154,10 +172,11 @@
                 return;
             }
             try {
-                await db.collection('settings').doc('permissions').set(permsData, { merge: true });
+                const docRef = doc(db, 'settings', 'permissions');
+                await setDoc(docRef, permsData, { merge: true });
                 console.log('✅ Permissions sauvegardées dans Firestore');
             } catch (error) {
-                console.error('❌ Erreur sauvegarde permissions:', error);
+                console.error('❌ Erreur sauvegarde permissions:', error.message);
             }
         };
 
@@ -167,14 +186,15 @@
                 return null;
             }
             try {
-                const doc = await db.collection('settings').doc('permissions').get();
-                if (doc.exists) {
+                const docRef = doc(db, 'settings', 'permissions');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
                     console.log('✅ Permissions chargées depuis Firestore');
-                    return doc.data();
+                    return docSnap.data();
                 }
                 return null;
             } catch (error) {
-                console.error('❌ Erreur chargement permissions:', error);
+                console.error('❌ Erreur chargement permissions:', error.message);
                 return null;
             }
         };
@@ -183,24 +203,26 @@
         const saveUsersToFirebase = async (usersData) => {
             if (!db) return;
             try {
-                await db.collection('settings').doc('users').set({ users: usersData }, { merge: true });
+                const docRef = doc(db, 'settings', 'users');
+                await setDoc(docRef, { users: usersData }, { merge: true });
                 console.log('✅ Utilisateurs sauvegardés dans Firestore');
             } catch (error) {
-                console.error('❌ Erreur sauvegarde utilisateurs:', error);
+                console.error('❌ Erreur sauvegarde utilisateurs:', error.message);
             }
         };
 
         const loadUsersFromFirebase = async () => {
             if (!db) return null;
             try {
-                const doc = await db.collection('settings').doc('users').get();
-                if (doc.exists && doc.data().users) {
+                const docRef = doc(db, 'settings', 'users');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists() && docSnap.data().users) {
                     console.log('✅ Utilisateurs chargés depuis Firestore');
-                    return doc.data().users;
+                    return docSnap.data().users;
                 }
                 return null;
             } catch (error) {
-                console.error('❌ Erreur chargement utilisateurs:', error);
+                console.error('❌ Erreur chargement utilisateurs:', error.message);
                 return null;
             }
         };
