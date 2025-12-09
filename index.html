@@ -147,6 +147,64 @@
             }
         };
 
+        // --- SYNCHRONISATION PERMISSIONS AVEC FIRESTORE ---
+        const savePermissionsToFirebase = async (permsData) => {
+            if (!db) {
+                console.warn('Firebase non disponible, permissions sauvegardées localement');
+                return;
+            }
+            try {
+                await db.collection('settings').doc('permissions').set(permsData, { merge: true });
+                console.log('✅ Permissions sauvegardées dans Firestore');
+            } catch (error) {
+                console.error('❌ Erreur sauvegarde permissions:', error);
+            }
+        };
+
+        const loadPermissionsFromFirebase = async () => {
+            if (!db) {
+                console.warn('Firebase non disponible');
+                return null;
+            }
+            try {
+                const doc = await db.collection('settings').doc('permissions').get();
+                if (doc.exists) {
+                    console.log('✅ Permissions chargées depuis Firestore');
+                    return doc.data();
+                }
+                return null;
+            } catch (error) {
+                console.error('❌ Erreur chargement permissions:', error);
+                return null;
+            }
+        };
+
+        // --- SYNCHRONISATION UTILISATEURS AVEC FIRESTORE ---
+        const saveUsersToFirebase = async (usersData) => {
+            if (!db) return;
+            try {
+                await db.collection('settings').doc('users').set({ users: usersData }, { merge: true });
+                console.log('✅ Utilisateurs sauvegardés dans Firestore');
+            } catch (error) {
+                console.error('❌ Erreur sauvegarde utilisateurs:', error);
+            }
+        };
+
+        const loadUsersFromFirebase = async () => {
+            if (!db) return null;
+            try {
+                const doc = await db.collection('settings').doc('users').get();
+                if (doc.exists && doc.data().users) {
+                    console.log('✅ Utilisateurs chargés depuis Firestore');
+                    return doc.data().users;
+                }
+                return null;
+            } catch (error) {
+                console.error('❌ Erreur chargement utilisateurs:', error);
+                return null;
+            }
+        };
+
         // --- COMPOSANT MODALE AJOUT ARTICLE EN VENTE ---
         const AddSaleModal = ({ isOpen, onClose, onAddItem }) => {
             const [name, setName] = useState('');
@@ -698,26 +756,45 @@
             const [loginPassword, setLoginPassword] = useState('');
             const [loginError, setLoginError] = useState('');
 
-            // Permissions modifiables (localStorage)
+            // Permissions modifiables (localStorage + Firebase)
             const [permissions, setPermissions] = useState(() => {
                 const saved = localStorage.getItem('posPermissions');
                 return saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS));
             });
 
-            // Utilisateurs modifiables (localStorage)
+            // Utilisateurs modifiables (localStorage + Firebase)
             const [users, setUsers] = useState(() => {
                 const saved = localStorage.getItem('posUsers');
                 return saved ? JSON.parse(saved) : MOCK_USERS;
             });
 
-            // Sauvegarder automatiquement
+            // Sauvegarder automatiquement permissions (localStorage + Firebase)
             useEffect(() => {
                 localStorage.setItem('posPermissions', JSON.stringify(permissions));
+                savePermissionsToFirebase(permissions);
             }, [permissions]);
 
+            // Sauvegarder automatiquement utilisateurs (localStorage + Firebase)
             useEffect(() => {
                 localStorage.setItem('posUsers', JSON.stringify(users));
+                saveUsersToFirebase(users);
             }, [users]);
+
+            // Charger données depuis Firebase au démarrage
+            useEffect(() => {
+                const initializeData = async () => {
+                    const fbPermissions = await loadPermissionsFromFirebase();
+                    const fbUsers = await loadUsersFromFirebase();
+                    
+                    if (fbPermissions) {
+                        setPermissions(fbPermissions);
+                    }
+                    if (fbUsers) {
+                        setUsers(fbUsers);
+                    }
+                };
+                initializeData();
+            }, []);
 
             // Vérifier session au chargement
             useEffect(() => {
