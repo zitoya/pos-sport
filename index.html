@@ -629,6 +629,38 @@
             );
         };
         // --- DONNÉES SIMULÉES (Adaptées Sport & Location) ---
+        
+        // Base de données utilisateurs
+        const MOCK_USERS = [
+            { id: 'U001', username: 'admin1', password: 'admin123', fullName: 'Administrateur Principal', role: 'admin', email: 'admin@caisse2.fr' },
+            { id: 'U002', username: 'admin2', password: 'admin123', fullName: 'Administrateur Secondaire', role: 'admin', email: 'admin2@caisse2.fr' },
+            { id: 'U003', username: 'vendeur', password: 'vendeur123', fullName: 'Jean Vendeur', role: 'employee', email: 'vendeur@caisse2.fr' },
+        ];
+
+        // Système de permissions par défaut
+        const DEFAULT_PERMISSIONS = {
+            admin: {
+                backoffice: { view: true, edit: true },
+                suppliers: { view: true, edit: true },
+                articles: { view: true, edit: true },
+                stock: { view: true, edit: true },
+                finances: { view: true, edit: true },
+                clients: { view: true, edit: true },
+                reports: { view: true, edit: true },
+                users: { view: true, edit: true },
+            },
+            employee: {
+                backoffice: { view: true, edit: false },
+                suppliers: { view: true, edit: false },
+                articles: { view: true, edit: false },
+                stock: { view: true, edit: false },
+                finances: { view: false, edit: false },
+                clients: { view: true, edit: true },
+                reports: { view: true, edit: false },
+                users: { view: false, edit: false },
+            },
+        };
+
         const MOCK_CLIENTS = [
             { id: 'C001', num: 'CLI-001', nom: 'Dupont', prenom: 'Jean', adresse: '123 Rue de la Paix', dateNaissance: '1990-05-15', ville: 'Chamonix', loyaltyPoints: 450 },
             { id: 'C002', num: 'CLI-002', nom: 'Martin', prenom: 'Sophie', adresse: '456 Avenue des Pistes', dateNaissance: '1985-08-20', ville: 'Annecy', loyaltyPoints: 120 },
@@ -659,6 +691,79 @@
         };
 
         const POS = () => {
+            // --- AUTHENTIFICATION ---
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [loginUsername, setLoginUsername] = useState('');
+            const [loginPassword, setLoginPassword] = useState('');
+            const [loginError, setLoginError] = useState('');
+
+            // Permissions modifiables (localStorage)
+            const [permissions, setPermissions] = useState(() => {
+                const saved = localStorage.getItem('posPermissions');
+                return saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS));
+            });
+
+            // Utilisateurs modifiables (localStorage)
+            const [users, setUsers] = useState(() => {
+                const saved = localStorage.getItem('posUsers');
+                return saved ? JSON.parse(saved) : MOCK_USERS;
+            });
+
+            // Sauvegarder automatiquement
+            useEffect(() => {
+                localStorage.setItem('posPermissions', JSON.stringify(permissions));
+            }, [permissions]);
+
+            useEffect(() => {
+                localStorage.setItem('posUsers', JSON.stringify(users));
+            }, [users]);
+
+            // Vérifier session au chargement
+            useEffect(() => {
+                const savedUser = localStorage.getItem('posCurrentUser');
+                if (savedUser) {
+                    const user = JSON.parse(savedUser);
+                    setCurrentUser(user);
+                    setIsLoggedIn(true);
+                }
+            }, []);
+
+            // Fonctions d'authentification
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const user = users.find(u => u.username === loginUsername && u.password === loginPassword);
+                if (user) {
+                    setCurrentUser(user);
+                    setIsLoggedIn(true);
+                    setLoginError('');
+                    localStorage.setItem('posCurrentUser', JSON.stringify(user));
+                } else {
+                    setLoginError('Identifiants incorrects');
+                }
+            };
+
+            const handleLogout = () => {
+                setIsLoggedIn(false);
+                setCurrentUser(null);
+                setLoginUsername('');
+                setLoginPassword('');
+                localStorage.removeItem('posCurrentUser');
+            };
+
+            // Fonctions de vérification des permissions
+            const canAccess = (section) => {
+                if (!currentUser) return false;
+                return permissions[currentUser.role]?.[section]?.view ?? false;
+            };
+
+            const canEdit = (section) => {
+                if (!currentUser) return false;
+                return permissions[currentUser.role]?.[section]?.edit ?? false;
+            };
+
+            const isAdmin = () => currentUser?.role === 'admin';
+
             const [cart, setCart] = useState([initialRentalItem]); // Panier pré-rempli pour la démo
             const [searchQuery, setSearchQuery] = useState('');
             const [serviceTab, setServiceTab] = useState('Vente'); // 'Vente', 'Location', 'Atelier'
@@ -1245,13 +1350,86 @@
 
             const tabs = ['Vente', 'Location', 'Services'];
 
+            // Écran de connexion
+            if (!isLoggedIn) {
+                return (
+                    <div className="flex h-screen items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
+                        <div className="bg-gray-800 p-12 rounded-2xl shadow-2xl w-full max-w-md border border-gray-700">
+                            <div className="text-center mb-8">
+                                <h1 className="text-4xl font-bold text-green-400 mb-2">🎿 Caisse2</h1>
+                                <p className="text-gray-400 text-lg">Système Point de Vente</p>
+                            </div>
+
+                            <form onSubmit={handleLogin} className="space-y-6">
+                                <div>
+                                    <label className="block text-gray-300 font-semibold mb-2">Utilisateur</label>
+                                    <input 
+                                        type="text"
+                                        value={loginUsername}
+                                        onChange={(e) => setLoginUsername(e.target.value)}
+                                        placeholder="Entrez votre nom d'utilisateur"
+                                        className="w-full bg-gray-700 text-white border border-gray-600 p-3 rounded-lg focus:outline-none focus:border-green-500 transition"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-gray-300 font-semibold mb-2">Mot de passe</label>
+                                    <input 
+                                        type="password"
+                                        value={loginPassword}
+                                        onChange={(e) => setLoginPassword(e.target.value)}
+                                        placeholder="Entrez votre mot de passe"
+                                        className="w-full bg-gray-700 text-white border border-gray-600 p-3 rounded-lg focus:outline-none focus:border-green-500 transition"
+                                    />
+                                </div>
+
+                                {loginError && (
+                                    <div className="bg-red-900/30 border border-red-700 text-red-400 p-3 rounded-lg text-sm font-semibold">
+                                        ❌ {loginError}
+                                    </div>
+                                )}
+
+                                <button 
+                                    type="submit"
+                                    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition shadow-lg"
+                                >
+                                    🔓 Se Connecter
+                                </button>
+                            </form>
+
+                            <div className="mt-8 border-t border-gray-700 pt-6">
+                                <p className="text-gray-400 text-sm text-center mb-4">Identifiants de démonstration :</p>
+                                <div className="bg-gray-700/50 p-3 rounded-lg space-y-2 text-xs text-gray-300">
+                                    <p><span className="font-semibold">Admin :</span> admin1 / admin123</p>
+                                    <p><span className="font-semibold">Vendeur :</span> vendeur / vendeur123</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="flex h-screen font-sans bg-gray-900">
                     
                     {/* --- GAUCHE : TICKET (25%) --- */}
                     <div className="w-1/4 flex flex-col bg-gray-800 border-r border-gray-700 shadow-2xl z-10 relative">
                         <div className="p-4 bg-gray-900 text-white flex justify-between items-center shadow-md">
-                            <h1 className="font-extrabold text-2xl text-green-400">POS Sport 🎿</h1>
+                            <div>
+                                <h1 className="font-extrabold text-2xl text-green-400">POS Sport 🎿</h1>
+                                <p className="text-xs text-gray-400 mt-1">👤 {currentUser?.fullName} <span className="text-yellow-400">({currentUser?.role === 'admin' ? 'Admin' : 'Vendeur'})</span></p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <button 
+                                    onClick={handleLogout}
+                                    className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded transition"
+                                    title="Déconnexion"
+                                >
+                                    🚪 Déco.
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-4 bg-gray-900 text-white shadow-md">
                             <div className="flex items-center space-x-3">
                                 <button 
                                     onClick={() => setIsBackOfficeOpen(true)}
@@ -1733,6 +1911,14 @@
                                         }`}
                                     >👥 CRM Clients</button>
                                     <button 
+                                        onClick={() => setBackOfficeTab('mentions')}
+                                        className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                            backOfficeTab === 'mentions' 
+                                                ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >⚖️ Mentions Légales</button>
+                                    <button 
                                         onClick={() => setBackOfficeTab('reports')}
                                         className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
                                             backOfficeTab === 'reports' 
@@ -1740,6 +1926,16 @@
                                                 : 'text-gray-400 hover:text-white'
                                         }`}
                                     >📈 Rapports</button>
+                                    {isAdmin() && (
+                                        <button 
+                                            onClick={() => setBackOfficeTab('users')}
+                                            className={`px-4 py-3 font-semibold transition whitespace-nowrap ${
+                                                backOfficeTab === 'users' 
+                                                    ? 'text-blue-400 border-b-2 border-blue-400' 
+                                                    : 'text-gray-400 hover:text-white'
+                                            }`}
+                                        >👨‍💼 Utilisateurs</button>
+                                    )}
                                 </div>
 
                                 {/* Contenu */}
@@ -2754,6 +2950,250 @@
                                                     })()}
                                                 </div>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET MENTIONS LÉGALES --- */}
+                                    {backOfficeTab === 'mentions' && (
+                                        <div className="space-y-6">
+                                            <h3 className="text-2xl font-bold text-white mb-6">⚖️ Mentions Légales & Informations Magasin</h3>
+                                            
+                                            {/* Avertissement */}
+                                            <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 mb-6">
+                                                <div className="text-yellow-400 font-semibold text-lg">⚠️ Données à Configurer</div>
+                                                <div className="text-yellow-300 text-sm mt-2">Remplissez tous les champs pour la conformité légale française</div>
+                                            </div>
+
+                                            {/* Identité du Magasin */}
+                                            <div className="bg-gray-700 p-6 rounded-lg border border-gray-600">
+                                                <h4 className="text-white font-bold text-lg mb-4">🏪 Identité du Magasin</h4>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">Nom du Magasin</label>
+                                                        <input type="text" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">SIRET</label>
+                                                        <input type="text" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">SIREN</label>
+                                                        <input type="text" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">Numéro TVA</label>
+                                                        <input type="text" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Contact et Localisation */}
+                                            <div className="bg-gray-700 p-6 rounded-lg border border-gray-600">
+                                                <h4 className="text-white font-bold text-lg mb-4">📍 Contact & Localisation</h4>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">Adresse</label>
+                                                        <input type="text" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label className="text-gray-300 text-sm block mb-2">Téléphone</label>
+                                                            <input type="tel" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-gray-300 text-sm block mb-2">Email</label>
+                                                            <input type="email" placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Conditions Commerciales */}
+                                            <div className="bg-gray-700 p-6 rounded-lg border border-gray-600">
+                                                <h4 className="text-white font-bold text-lg mb-4">💳 Conditions Commerciales</h4>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">Moyens de paiement acceptés</label>
+                                                        <textarea placeholder="Espèces, Carte bancaire, Chèque..." className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm h-20"></textarea>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-gray-300 text-sm block mb-2">Politique de retour et garantie</label>
+                                                        <textarea placeholder="[À REMPLIR]" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm h-20"></textarea>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Protection des Données */}
+                                            <div className="bg-gray-700 p-6 rounded-lg border border-gray-600">
+                                                <h4 className="text-white font-bold text-lg mb-4">🔒 Protection des Données (RGPD)</h4>
+                                                <div>
+                                                    <label className="text-gray-300 text-sm block mb-2">Responsable de traitement</label>
+                                                    <textarea placeholder="Nom et contact du responsable RGPD" className="w-full bg-gray-600 text-white p-2 rounded border border-gray-500 text-sm h-16"></textarea>
+                                                </div>
+                                            </div>
+
+                                            {/* Bouton de sauvegarde */}
+                                            <div className="flex gap-2">
+                                                <button className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition">💾 Sauvegarder</button>
+                                                <button className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-semibold transition">📥 Télécharger PDF</button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* --- ONGLET UTILISATEURS ET PERMISSIONS --- */}
+                                    {backOfficeTab === 'users' && (
+                                        <div className="space-y-6">
+                                            {!isAdmin() ? (
+                                                <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-center">
+                                                    <div className="text-red-400 text-lg font-bold">🔒 Accès Refusé</div>
+                                                    <div className="text-red-300 text-sm mt-2">Seuls les administrateurs peuvent gérer les utilisateurs</div>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <div className="flex items-center justify-between">
+                                                        <h3 className="text-2xl font-bold text-white">👨‍💼 Gestion des Utilisateurs & Permissions</h3>
+                                                        <button 
+                                                            onClick={() => {
+                                                                const username = prompt('Nom d\'utilisateur :');
+                                                                if (!username) return;
+                                                                const password = prompt('Mot de passe :');
+                                                                if (!password) return;
+                                                                const fullName = prompt('Nom complet :');
+                                                                if (!fullName) return;
+                                                                const role = prompt('Rôle (admin ou employee) :');
+                                                                if (role !== 'admin' && role !== 'employee') {
+                                                                    alert('Rôle invalide');
+                                                                    return;
+                                                                }
+                                                                const newUser = {
+                                                                    id: 'U' + String(users.length + 1).padStart(3, '0'),
+                                                                    username,
+                                                                    password,
+                                                                    fullName,
+                                                                    role,
+                                                                    email: `${username}@caisse2.fr`
+                                                                };
+                                                                setUsers([...users, newUser]);
+                                                                alert('Utilisateur créé avec succès');
+                                                            }}
+                                                            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition"
+                                                        >
+                                                            ➕ Ajouter Utilisateur
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Liste des utilisateurs */}
+                                                    <div className="bg-gray-700 p-6 rounded-lg border border-gray-600">
+                                                        <h4 className="text-white font-bold text-lg mb-4">📋 Liste des Utilisateurs</h4>
+                                                        <div className="space-y-3">
+                                                            {users.map((user) => (
+                                                                <div key={user.id} className="bg-gray-800 p-4 rounded-lg border border-gray-600 flex items-center justify-between">
+                                                                    <div className="flex-1">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <span className="text-white font-bold">{user.fullName}</span>
+                                                                            <span className={`text-xs px-2 py-1 rounded ${user.role === 'admin' ? 'bg-purple-600 text-white' : 'bg-blue-600 text-white'}`}>
+                                                                                {user.role === 'admin' ? 'Administrateur' : 'Vendeur'}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="text-sm text-gray-400 mt-1">
+                                                                            👤 {user.username} | 📧 {user.email}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex gap-2">
+                                                                        <button 
+                                                                            onClick={() => {
+                                                                                const newPassword = prompt(`Nouveau mot de passe pour ${user.username} :`);
+                                                                                if (newPassword) {
+                                                                                    setUsers(users.map(u => u.id === user.id ? {...u, password: newPassword} : u));
+                                                                                    alert('Mot de passe modifié');
+                                                                                }
+                                                                            }}
+                                                                            className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded transition"
+                                                                        >
+                                                                            🔑 MDP
+                                                                        </button>
+                                                                        {users.length > 1 && (
+                                                                            <button 
+                                                                                onClick={() => {
+                                                                                    if (confirm(`Supprimer ${user.fullName} ?`)) {
+                                                                                        setUsers(users.filter(u => u.id !== user.id));
+                                                                                    }
+                                                                                }}
+                                                                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition"
+                                                                            >
+                                                                                🗑️
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Gestion des permissions */}
+                                                    <div className="bg-gray-700 p-6 rounded-lg border border-gray-600">
+                                                        <h4 className="text-white font-bold text-lg mb-4">🔐 Permissions par Rôle</h4>
+                                                        <div className="space-y-6">
+                                                            {['admin', 'employee'].map((role) => (
+                                                                <div key={role} className="bg-gray-800 p-4 rounded-lg border border-gray-600">
+                                                                    <h5 className="text-white font-semibold mb-3">
+                                                                        {role === 'admin' ? '👑 Administrateur' : '👨‍💼 Employé (Vendeur)'}
+                                                                    </h5>
+                                                                    <div className="grid grid-cols-1 gap-2">
+                                                                        {Object.keys(permissions[role]).map((section) => (
+                                                                            <div key={section} className="flex items-center justify-between bg-gray-900 p-3 rounded">
+                                                                                <span className="text-gray-300 text-sm capitalize">{section}</span>
+                                                                                <div className="flex gap-4">
+                                                                                    <label className="flex items-center gap-2 text-sm">
+                                                                                        <input
+                                                                                            type="checkbox"
+                                                                                            checked={permissions[role][section].view}
+                                                                                            onChange={(e) => {
+                                                                                                setPermissions({
+                                                                                                    ...permissions,
+                                                                                                    [role]: {
+                                                                                                        ...permissions[role],
+                                                                                                        [section]: {
+                                                                                                            ...permissions[role][section],
+                                                                                                            view: e.target.checked
+                                                                                                        }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="w-4 h-4"
+                                                                                        />
+                                                                                        <span className="text-blue-400">👁️ Lecture</span>
+                                                                                    </label>
+                                                                                    <label className="flex items-center gap-2 text-sm">
+                                                                                        <input
+                                                                                            type="checkbox"
+                                                                                            checked={permissions[role][section].edit}
+                                                                                            onChange={(e) => {
+                                                                                                setPermissions({
+                                                                                                    ...permissions,
+                                                                                                    [role]: {
+                                                                                                        ...permissions[role],
+                                                                                                        [section]: {
+                                                                                                            ...permissions[role][section],
+                                                                                                            edit: e.target.checked
+                                                                                                        }
+                                                                                                    }
+                                                                                                });
+                                                                                            }}
+                                                                                            className="w-4 h-4"
+                                                                                        />
+                                                                                        <span className="text-green-400">✏️ Édition</span>
+                                                                                    </label>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     )}
 
